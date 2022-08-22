@@ -1,0 +1,169 @@
+---
+title: "latgrad_coi_share_v1"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+R markdown for COI amplicon sequencing
+
+
+```{r}
+#basic initialization 
+
+rm(list=ls())
+
+require(tidyverse)
+require(ggplot2)
+require(phyloseq)
+
+#set directory if needed
+#setwd("~/Google Drive/Shared drives/LPH_latgrad_datashare/")
+
+```
+
+import into phyloseq
+```{r}
+#otu table 
+otu.in<- read.table("v1_data/coi_otu_table.txt", sep="\t", header=TRUE, row.names=1)
+#turn into matrix
+otu.in<- as.matrix(otu.in)
+
+#import tax
+tax.in<- read.table(file="v1_data/coi_taxonomy.tsv", sep="\t", header=TRUE, row.names = 1)
+#convert to matrix
+tax.in<- as.matrix(tax.in)
+
+#read in metadata
+meta<- read.table(file="v1_data/coi_meta.csv", sep=",", header=TRUE, row.names=1)
+
+#read in tree
+phy_tree<- read_tree("v1_data/coi_tree.nwk")
+
+#import into phyloseq
+OTU<- otu_table(otu.in, taxa_are_rows = TRUE)
+TAX<- tax_table(tax.in)
+META<- sample_data(meta)
+
+#check names are consistent
+taxa_names(TAX)
+taxa_names(OTU)
+taxa_names(phy_tree)
+
+#check sample names are consistent
+sample_names(OTU)
+sample_names(META)
+
+#they aren't consistent, which means i probably have to filter? 
+#phyloseq filters to match them 
+coi.ps<- phyloseq(OTU, TAX, META, phy_tree)
+
+#save as an object so i don't have to go back
+#saveRDS(coi.ps, file="phyloseq_coi.rds")
+
+```
+
+looking at depth and basic QC
+```{r}
+#look at read depth 
+#make dataframe first 
+coi.ps.df<- as.data.frame(sample_data(coi.ps))
+#get sums
+coi.ps.df$libsize<- sample_sums(coi.ps)
+
+#visualize
+#plot.readdepth<- 
+ggplot(coi.ps.df, aes(libsize)) +
+  geom_histogram(aes(fill=substrate), binwidth=50)+ 
+  scale_fill_manual(values =c("#ef8a62", "#67a9cf", "#bdbdbd")) +
+  theme_classic() +
+  xlab("sequencing depth") +
+  ylab("count")
+
+#summary stats
+mean(coi.ps.df$libsize)
+median(coi.ps.df$libsize)
+min(coi.ps.df$libsize)
+max(coi.ps.df$libsize)
+
+```
+
+visualizing COI calls 
+```{r}
+#remove those ASVs with fewer than 50 total occurences 
+coi.ps.r<- coi.ps %>%
+  filter_taxa(function(x) sum(x) > 50, TRUE) %>%
+  prune_taxa(taxa_sums(.) > 0, .)
+#remove the flies with fewer than 50 reads 
+coi.ps.rr<- prune_samples(sample_sums(coi.ps.r) >= 50, coi.ps.r)
+#lose 629-594 = 35 samples with this prune
+#coi.ps.rr<- prune_samples(sample_sums(coi.ps.rr) >0, coi.ps.rr)
+
+#total number of reads
+sum(sample_sums(coi.ps.rr))
+
+cleansums<- as.data.frame(sample_sums(coi.ps.rr))
+
+cleansums %>%
+  rename(counts = `sample_sums(coi.ps.rr)`) %>%
+  summarise(n=n(), avg=mean(counts), sdev=sd(counts), se = sdev/sqrt(n))
+  
+#no tax glom 
+coi.psmelt<- coi.ps.rr %>%
+  psmelt()
+
+#still keeping 8 ASVs 
+coi.psmelt %>%
+  group_by(OTU, Taxon) %>%
+  summarise(n=n())
+
+#visualize each individual and can see some messiness (i.e., more than 1 COI/individual)
+plot.coi.filter<-
+ggplot(coi.psmelt, aes(x=fct_reorder(Sample, latitude), y=Abundance, fill=OTU)) + 
+    geom_bar(stat="identity", position = "fill", width=1) + 
+    #facet_wrap(~location, nrow=2) + 
+    theme_bw() + 
+    xlab("") + 
+    ylab("Relative abundance") + 
+    scale_fill_brewer(palette = "Set2") +
+    theme(axis.text.x = element_text(angle=45, hjust=1)) +
+    theme(panel.grid = element_blank()) + 
+    theme(legend.position = "right") +
+    theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+ggsave(plot.coi.filter, file="plots/supp_S1_coi_melsim_asv_leg.tiff", height=5, width=7.5)
+
+```
+
+cleaning up data to store the COI call for species
+removing any individual without clear dominance by 1 ASV
+
+```{r}
+fly.coicall<-  
+coi.psmelt %>%
+  group_by(Sample) %>%
+  mutate(ind.sum = sum(Abundance)) %>%
+  group_by(Taxon) %>%
+  mutate(relabund = Abundance/ind.sum) %>%
+  select(OTU, Sample, location, substrate, latitude, Abundance, Taxon, ind.sum, relabund) %>%
+  filter(substrate != "neg.ctrl") %>%
+  #remove samples that don't have an ASV > 90% 
+  filter(relabund > 0.90) 
+
+#summary exploration
+fly.coicall %>%
+  group_by(Taxon) %>%
+  summarise(n=n())
+
+fly.coicall %>%
+  group_by(location) %>%
+  summarise(n=n())
+
+fly.coicall %>%
+  group_by(substrate) %>%
+  summarise(n=n())
+
+#save output to be used in latgrad_comp_share_v1 notebook 
+write.table(fly.coicall, file="v1_data/latgrad_coicall.csv", sep=",", col.names=TRUE, row.names = FALSE)
+```
+
