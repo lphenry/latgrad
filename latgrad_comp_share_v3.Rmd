@@ -1,0 +1,2247 @@
+---
+title: "latgrad_comp_share_v1"
+output:
+  html_document: default
+  pdf_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+code used to organize data, generate figures, and statistical analyses for "Latitudinal cline does not predict variation in the microbiome of wild Drosophila melanogaster"
+
+
+basic intialization
+```{r}
+rm(list=ls())
+
+#basic manip and aesethics 
+require(ggplot2)
+require(forcats)
+require(tidyverse)
+require(RColorBrewer)
+require(ggpubr)
+
+#microboime/amplicons 
+require(phyloseq)
+
+#for maps
+require(maps)
+require(mapdata)
+require(ggrepel)
+
+#env pc 
+require(factoextra)
+
+#ecostats
+require(vegan)
+require(picante)
+require(btools)
+
+#linear modeling, though i call them directly. i.e. lme4::lmer
+#require(lme4)
+#require(lmerTest)
+#require(MuMIn)
+
+#neutrality work
+#for neutrality model 
+require(stats4)
+require(Hmisc)
+require(minpack.lm)
+#packages i call directly b/c conflicts, but make downloaded for neutrality analysis
+#install.packages("sjPlot")
+#install.packages("ranacapa")
+#install.packages("tyRa")
+
+#working dir if needed
+#setwd("~/Google Drive/Shared drives/LPH_latgrad_datashare/")
+```
+
+some aesthetics 
+```{r}
+#palette for big state to show colors by s->n hot->cool
+pal.bigstate<- c("#fb8072", "#fdb462", "#ffffb3", "#b3de69", "#8dd3c7", "#80b1d3", "#bebada")
+
+
+#pallete for fly, fly.frass, grape, apple 
+pal.group<- c("#fc8d62", "#80b1d3", "#d9d9d9", "#bc80bd")
+
+#pal for fly, fly frass, and substrate
+pal.ffs<- c("#636363", "#bdbdbd", "#4eb3d3")
+
+#orch.vin palette
+pal.ov<- c("#fb6a4a", "#756bb1")
+
+#pal for melanogaster, simulans
+pal.ms<-c("#3ddbd9", "#78a9ff")
+
+```
+
+fig. 1-based on climate/environmental differences between sites
+Fig 1A is map 
+```{r}
+#load all climate/environmental data first 
+clim<- read.table("v1_data/latgrad_climate_temprecip.csv", sep=",", header=TRUE)
+
+
+#change names of sites so that numbered by latitude (1 is most north), state, and orchard vs vineyard
+#ie North Chester is 1.ME.O
+clim$shortname<- case_when(clim$site == "North Chester" ~ "1.ME.O", 
+                           clim$site == "Rocky Ridge" ~ "2.ME.O", 
+                           clim$site == "Carter Hill Orchard" ~ "3.NH.O", 
+                           clim$site == "Woodstock" ~ "4.CT.O",
+                           clim$site == "Taylor Brooke " ~ "5.CT.V", 
+                           clim$site == "Unionville 9-28" ~ "6.NJ.V*", 
+                           clim$site == "Solebury 9-28" ~ "7.PA.O", 
+                           clim$site == "Terhune 26-9" ~ "8.NJ.O*",
+                           clim$site == "Lohrs Orchard" ~ "9.MD.O*", 
+                           clim$site == "Boordys" ~ "10.MD.V",  
+                           clim$site == "Carter Mtn" ~ "11.VA.O*", 
+                           clim$site == "Blenheim" ~ "12.VA.V", 
+                           clim$site == "St Paul Wine" ~ "13.NC.V*",
+                           clim$site == "Grandaddys" ~ "14.NC.O*", 
+                           clim$site == "Burnt Shirt Vineyard" ~ "15.NC.V", 
+                           clim$site == "Tiger Mountain" ~ "16.GA.V", 
+                           clim$site == "Brysons " ~ "17.GA.O")
+
+#first get USA map
+states<- map_data("state")
+
+#get only the states i sampled in 
+east_coast<- subset(states, region %in% c("maine", "vermont", "new hampshire", "massachusetts", "rhode island", "connecticut", 
+                                          "new york", "new jersey", "pennsylvania", "delaware", "maryland", "virginia", "west virginia",
+                                          "north carolina", "south carolina", "georgia"))
+
+
+#also make a map with only the melanogaster dominant sites
+clim.melonly<-
+  clim %>%
+  filter(shortname != "9.MD.O*" & shortname !="11.VA.O*" & shortname !="13.NC.V*" & shortname !="14.NC.O*")
+  
+#plot.map.melonly<-
+ggplot() + 
+  geom_polygon(data=east_coast, aes(x=long, y=lat, group=group), size=0.5, fill="white", color="#636363") +
+  geom_point(data=clim.melonly, aes(x=longitude, y=latitude, color=orch.vin, fill=orch.vin), 
+             shape=21, size=6, stroke=1.2, alpha=0.5, position="jitter") + 
+  geom_label_repel(data=clim.melonly, 
+                  aes(longitude, latitude, label=shortname, group=shortname, color=orch.vin), 
+                  size=6, 
+                  box.padding=0.7, point.padding=0.7) +
+  coord_fixed(xlim=c(-84.43, -67.42), ylim=c(33.80, 46.45), ratio= 1.3) +
+  xlab("") +
+  ylab("") +
+  scale_color_manual(values = pal.ov) +
+  scale_fill_manual(values = pal.ov) +
+  theme_void() + 
+  theme(legend.position = "none")
+
+#ggsave(plot.map.melonly, file="plots/fig1_map_melonly_fpo.pdf", height=7.5, width=7.5)
+
+
+#to look at all sites collected (an additional two that were removed from analyses because too low D mel count)
+
+#plot.map.allsites<-
+ggplot() + 
+  geom_polygon(data=east_coast, aes(x=long, y=lat, group=group), size=0.5, fill="white", color="#636363") +
+  geom_point(data=clim, aes(x=longitude, y=latitude, color=orch.vin, fill=orch.vin), shape=21, size=6, stroke=1.2, alpha=0.5, position="jitter") + 
+  geom_label_repel(data=clim, 
+                  aes(longitude, latitude, label=shortname, group=shortname, color=orch.vin), 
+                  size=6, 
+                  box.padding=0.7, point.padding=0.7) +
+  coord_fixed(xlim=c(-84.43, -67.42), ylim=c(33.80, 46.45), ratio= 1.3) +
+  xlab("") +
+  ylab("") +
+  scale_color_manual(values = pal.ov) +
+  scale_fill_manual(values = pal.ov) +
+  theme_void() + 
+  theme(legend.position = "none")
+  
+#ggsave(plot.map.allsites, file="plots/supp_M2A_map_allsites.pdf", height=7.5, width=7.5)
+
+
+```
+
+
+cleaning up and organizing the climate PC data 
+```{r}
+#have to remove the factoral variables and latitude/longitude
+#removing county density b/c zip is more relevant and stdevs b/c not sure biology here
+climate<- clim %>% remove_rownames() %>% column_to_rownames(var="shortname") %>%
+  select(-c(orch.vin, latitude, longitude, zipcode, weather.station, distance.from.site, day.sample, county.density, month.avg.high.std, month.avg.low.sd, month.avg.avg.std, county, site, X, X.1, X.2, X.3, X.4))
+
+#save orchvin as a group variable
+grp.ov<- clim %>% remove_rownames() %>% column_to_rownames(var="shortname") %>%
+  select(orch.vin)
+
+#make the pca
+climate.pca<- prcomp(climate, scale=TRUE)
+
+#visualize scree plot
+#plot.clim.scree<-
+fviz_eig(climate.pca, geom="bar", main="", barfill = "grey", barcolor = "grey", addlabels = FALSE) + 
+  theme_classic()  
+
+#ggsave(plot.clim.scree, file="plots/supp_M4C_climate_scree.pdf", height=5, width=5)
+
+#visualize the sites
+#plot variables
+plot.clim.var<- fviz_pca_var(climate.pca, repel = TRUE) 
+
+#ggsave(plot.clim.var, file="plots/supp_M4A_climate_plot_var.pdf", height=5, width=5)
+
+#plot individuals
+plot.clim.ind<- fviz_pca_ind(climate.pca, repel=TRUE)
+#ggsave(plot.clim.ind, file="plots/supp_M4B_climate_plot_ind.pdf", height=5, width=5)
+
+
+#want to find the important contributors
+var_coord_func <- function(loadings, comp.sdev){
+  loadings*comp.sdev
+}
+
+#calculate coordinates 
+loadings <- climate.pca$rotation
+sdev <- climate.pca$sdev
+var.coord <- t(apply(loadings, 1, var_coord_func, sdev)) 
+head(var.coord[, 1:4])
+
+#calculate cos2 distance to center
+var.cos2 <- var.coord^2
+head(var.cos2[, 1:4])
+
+#calculate contributions 
+comp.cos2 <- apply(var.cos2, 2, sum)
+contrib <- function(var.cos2, comp.cos2){var.cos2*100/comp.cos2}
+var.contrib <- t(apply(var.cos2,1, contrib, comp.cos2))
+#head(var.contrib[, 1:4])
+
+#save the contribution to examine more closely 
+#write.table(var.contrib, file="v1_data/latgrad_climate_explain_precip.csv", sep=",", row.names = TRUE)
+
+#get the pc coordinates 
+res.var<- get_pca_var(climate.pca)
+res.ind<- get_pca_ind(climate.pca)
+
+#working to check w/ visualization that i got the coords i thought i did 
+check.1<- res.ind$coord
+#add site name 
+check.2<- as_tibble(check.1, rownames=NA) %>%  rownames_to_column(var="site")
+check.2$site<- as.factor(check.2$site)
+
+
+#need to add pc1 and pc2 to the clim data
+clim.pcs<-
+  check.2 %>%
+  rename(shortname = site) %>%
+  select(shortname, Dim.1, Dim.2) %>%
+  merge(clim, ., by="shortname", all.x=TRUE) %>%
+  rename(location = site) %>%
+  select(-c(month.avg.high.std, month.avg.low.sd, month.avg.avg.std))
+
+
+#looking at correlation of top2 dimensions with latitude
+#plot.clim.dim1<-
+ggplot(clim.pcs, aes(x=latitude, y=Dim.1)) + 
+  geom_smooth(method="lm", color="black") + 
+  geom_point(aes(color=orch.vin)) + 
+  scale_color_manual(values=pal.ov) + 
+  theme_classic() +
+  theme(legend.position = "bottom")
+
+#ggsave(plot.clim.dim1, file="plots/supp_M5A_climate_latdim1_leg.pdf", height=4, width=4)
+
+summary(lm(data=clim.pcs, Dim.1~latitude))
+
+#plot.clim.dim2<-
+ggplot(clim.pcs, aes(x=latitude, y=Dim.2)) + 
+  geom_smooth(method="lm", color="black") + 
+  geom_point(aes(color=orch.vin)) + 
+  scale_color_manual(values=pal.ov) + 
+  theme_classic() +
+  theme(legend.position = "none")
+
+#ggsave(plot.clim.dim2, file="plots/supp_M5B_climate_latdim2.pdf", height=4, width=4)
+
+summary(lm(data=clim.pcs, Dim.2~latitude+orch.vin))
+
+#some basic exploration of variation in some variables just to show range
+#plot.clim.temp<-
+clim %>%
+  #convert to celsius
+  mutate(month.avg.avg.C = (month.avg.avg-32)*5/9,
+         month.avg.low.C = (month.avg.low-32)*5/9, 
+         month.avg.high.C = (month.avg.high-32)*5/9) %>%
+  ggplot(., aes(x=fct_reorder(shortname, latitude), y=month.avg.avg.C)) +
+  geom_segment(aes(x=fct_reorder(shortname, latitude), xend=fct_reorder(shortname, latitude), y=month.avg.low.C, yend=month.avg.high.C)) + 
+  geom_point(aes(color=orch.vin)) +
+  scale_color_manual(values=pal.ov) +
+  xlab("") + 
+  ylab(expression("Avg. monthly temperature "*degree*"C")) + 
+  coord_flip() + 
+  theme_classic() +
+  theme(legend.position = "none")
+
+#ggsave(plot.clim.temp, file="plots/supp_M4D_climate_temp.pdf", height =5, width =5 )
+
+#get numbers for temp 
+clim %>%
+  summarise(min=min(month.avg.avg), avg=mean(month.avg.avg), max=max(month.avg.avg))
+
+#do elevation
+#plot.clim.elevation<- 
+clim %>%
+  #convert feet to meters
+  mutate(elevation.m = elevation*0.3048) %>%
+  ggplot(., aes(x=fct_reorder(shortname, latitude), y=elevation.m)) +
+  geom_point(aes(color=orch.vin)) +
+  geom_segment(aes(x=fct_reorder(shortname, latitude), xend=fct_reorder(shortname, latitude), y=0, yend=elevation.m)) +
+  scale_color_manual(values=pal.ov) + 
+  xlab("") +
+  ylab("Elevation (m)") +
+  theme_classic() + 
+  theme(legend.position="none") +
+  coord_flip()
+
+#ggsave(plot.clim.elevation, file="plots/supp_M4E_climate_elevation.pdf", height =5, width =5 )
+
+
+#plot.clim.home<- 
+clim %>%
+  mutate(zip.homeprice.s= zip.homeprice/10000) %>%
+  ggplot(., aes(x=fct_reorder(shortname, latitude), y=zip.homeprice)) +
+  geom_point(aes(color=orch.vin)) +
+  geom_segment(aes(x=fct_reorder(shortname, latitude), xend=fct_reorder(shortname, latitude), y=0, yend=zip.homeprice)) +
+  scale_color_manual(values=pal.ov) + 
+  xlab("") +
+  ylab("Homeprice ($USD)") +
+  theme_classic() + 
+  theme(legend.position="none") +
+  scale_y_continuous(labels = scales::comma) +
+  coord_flip()
+
+#ggsave(plot.clim.home, file="plots/supp_M4F_climate_homeprice.pdf", height =5, width =5 )
+
+
+```
+
+building the metadata with climate
+```{r}
+#building and correcting metadata
+#buildling metadata for analysis of environmental drivers of microbiome diversity 
+
+
+#this latgrad data set already removed wolbachia, mitos, chloroplasts, and contaminants 
+latgrad <- readRDS("v1_data/latgrad_nowolb.rds")
+
+#remove the neg.ctrls
+lg<- latgrad %>%
+    subset_samples(Sample_or_Control != "negctrl") %>%
+      prune_taxa(taxa_sums(.) > 0, .)
+
+
+#get total sample sums 
+#3240709
+sum(sample_sums(lg))
+
+
+#reorder the factor levels for bigstate
+lg@sam_data$bigstate_f<- factor(lg@sam_data$bigstate, levels=c("GA + SC", "NC", "VA", "MD", "NJ + PA", "CT + NH", "ME"))
+
+#reorder factor levels for group
+lg@sam_data$group_f<- factor(lg@sam_data$group, levels=c("fly", "fly frass", "fly.pool", "grape", "apple", "leaf"))
+
+#add in substrate more broadly
+lg@sam_data$substrate.vis<- case_when(lg@sam_data$group == "apple" ~ "substrate",
+                                      lg@sam_data$group == "fly" ~ "fly", 
+                                      lg@sam_data$group == "fly frass" ~ "fly.frass", 
+                                      lg@sam_data$group == "grape" ~ "substrate")
+
+#convert substrate.vis to factor
+lg@sam_data$substrate.vis<- as.factor(lg@sam_data$substrate.vis)
+
+#brysons fly poop is mis labelled, relabelling the orch vin this way 
+lg@sam_data$orch.vin <- case_when(lg@sam_data$location == "Blenheim" ~ "vineyard", 
+                                  lg@sam_data$location == "Boordys" ~ "vineyard",
+                                  lg@sam_data$location == "Brysons " ~ "orchard",
+                                  lg@sam_data$location == "Burnt Shirt Vineyard" ~ "vineyard",
+                                  lg@sam_data$location == "Carter Hill Orchard" ~ "orchard",
+                                  lg@sam_data$location == "Carter Mtn" ~ "orchard",
+                                  lg@sam_data$location == "Grandaddys" ~ "orchard", 
+                                  lg@sam_data$location == "Lohrs Orchard" ~ "orchard",
+                                  lg@sam_data$location == "North Chester" ~ "orchard",
+                                  lg@sam_data$location == "Rocky Ridge" ~ "orchard",
+                                  lg@sam_data$location == "Solebury 9-28" ~ "orchard",
+                                  lg@sam_data$location == "St Paul Wine" ~ "vineyard",
+                                  lg@sam_data$location == "Taylor Brooke " ~ "vineyard",
+                                  lg@sam_data$location == "Terhune 11-1" ~ "orchard",
+                                  lg@sam_data$location == "Terhune 23-10" ~ "orchard",
+                                  lg@sam_data$location == "Terhune 26-9" ~ "orchard",
+                                  lg@sam_data$location == "Tiger Mountain" ~ "vineyard",
+                                  lg@sam_data$location == "Unionville 10-17" ~ "vineyard",
+                                  lg@sam_data$location == "Unionville 9-28" ~ "vineyard",
+                                  lg@sam_data$location == "Woodstock" ~ "orchard")
+
+
+#need to export the sample data to add in PCs from climate axes
+lg.sam<- as_tibble(sample_data(latgrad), rownames=NA) %>% rownames_to_column(var="sampleID")
+
+#add in site loadings on PC1&2 from climate analysis
+lg.sam.clim<- merge(lg.sam, clim.pcs, by="location", all.x=TRUE)
+
+
+
+```
+
+
+
+examining the differences between coi species assignment across flies  
+```{r}
+#species called by coi amplicon sequencing 
+lg.coi<- read.table("v1_data/latgrad_coicall.csv", sep=",", header=TRUE)
+
+#check temp range
+lg.sam.clim %>%
+  filter(!is.na(day.avg)) %>%
+  group_by(shortname, latitude.x) %>%
+  summarise(avg=mean(month.avg.high)) %>%
+  arrange(desc(avg))
+
+
+#have to match names to merge into lg.sam.clim 
+lg.sam.clim.coi<- 
+lg.coi %>%
+  rename(sampleID = Sample) %>%
+  #removing redundant information
+  select(-c(latitude, location)) %>%
+  merge(lg.sam.clim, ., by="sampleID", all.x=TRUE)
+
+
+
+
+#want to see percentage of flies without COI calls
+#only missing 11 F and 12 M flies 
+lg.sam.clim.coi %>%
+  filter(substrate.x == "fly.M" | substrate.x == "fly.F") %>%
+  group_by(substrate.x, Taxon) %>%
+  summarise(n=n())
+
+#see where the missing flies are. missing eight from lohrs, but still have 22 w/ sequences. 
+lg.sam.clim.coi %>%
+  filter(substrate.x == "fly.M" | substrate.x == "fly.F") %>%
+  filter(is.na(Taxon)) %>%
+  group_by(location, shortname) %>%
+  summarise(n=n()) 
+
+
+#fix the shortnames for visualization to match map
+lg.sam.clim.coi$shortname<- case_when(lg.sam.clim.coi$location == "North Chester" ~ "1.ME.O", 
+                           lg.sam.clim.coi$location == "Rocky Ridge" ~ "2.ME.O", 
+                           lg.sam.clim.coi$location == "Carter Hill Orchard" ~ "3.NH.O", 
+                           lg.sam.clim.coi$location == "Woodstock" ~ "4.CT.O",
+                           lg.sam.clim.coi$location == "Taylor Brooke " ~ "5.CT.V", 
+                           lg.sam.clim.coi$location == "Unionville 9-28" ~ "6.NJ.V*.E", 
+                           lg.sam.clim.coi$location == "Unionville 10-17" ~ "6.NJ.V*.L",
+                           lg.sam.clim.coi$location == "Solebury 9-28" ~ "7.PA.O", 
+                           lg.sam.clim.coi$location == "Terhune 26-9" ~ "8.NJ.O*.E",
+                           lg.sam.clim.coi$location == "Terhune 23-10" ~ "8.NJ.O*.L",
+                           lg.sam.clim.coi$location == "Lohrs Orchard" ~ "9.MD.O", 
+                           lg.sam.clim.coi$location == "Boordys" ~ "10.MD.V",  
+                           lg.sam.clim.coi$location == "Carter Mtn" ~ "11.VA.O", 
+                           lg.sam.clim.coi$location == "Blenheim" ~ "12.VA.V", 
+                           lg.sam.clim.coi$location == "St Paul Wine" ~ "13.NC.V",
+                           lg.sam.clim.coi$location == "Grandaddys" ~ "14.NC.O", 
+                           lg.sam.clim.coi$location == "Burnt Shirt Vineyard" ~ "15.NC.V", 
+                           lg.sam.clim.coi$location == "Tiger Mountain" ~ "16.GA.V", 
+                           lg.sam.clim.coi$location == "Brysons " ~ "17.GA.O")
+
+#visualize individual variation (and can see that only includes those )
+#plot.coi.location<- 
+lg.sam.clim.coi %>%
+  filter(!is.na(Taxon)) %>%
+  filter(!is.na(shortname)) %>%
+  ggplot(., aes(x=fct_reorder(shortname, latitude.x), y=Abundance, fill=Taxon)) +
+    geom_bar(stat="identity", position="fill") + 
+    theme_classic() +
+    scale_fill_manual(values=pal.ms) + 
+    theme(axis.text.x = element_text(angle=45, hjust=1)) + 
+    xlab("")+
+    ylab("Proportion mel/sim") + 
+    theme(legend.position = "bottom")
+
+#ggsave(plot.coi.location, file="plots/supp_M2B_coi_all.tiff", height=3, width=6)
+
+
+#look at percentage breakdown for all flies  
+#merge w/ climate data to show no real correlation w/ environment 
+#have ot remove the 1 november terhune sampling 
+site.coi<- 
+  lg.sam.clim.coi %>% 
+  filter(!is.na(shortname)) %>%
+  filter(group == "fly") %>%
+  group_by(location, Taxon) %>%
+  tally() %>%
+  pivot_wider(names_from = Taxon, values_from = n) %>%
+  replace(is.na(.), 0) %>%
+  mutate(total=k__melanogaster + k__simulans, percMel = k__melanogaster/total) 
+
+#merge w/ clim to look at variation for main season
+site.clim.coi<- merge(clim, site.coi, by.x="site", by.y="location", all.x=TRUE)
+site.clim.coi<- merge(site.coi, clim, by.x="location", by.y="site", all.y=TRUE)
+
+#show difference between orchard and vineyard 
+#plot.ms.orchvin<-
+ggplot(site.clim.coi, aes(x=orch.vin, y=percMel)) + 
+  geom_boxplot(aes(color=orch.vin)) + 
+  geom_point(aes(color=orch.vin)) + 
+  scale_color_manual(values = pal.ov) + 
+  theme_classic() +
+  scale_y_continuous(limits=c(0, 1.1), breaks=c(0, 0.25, 0.5, 0.75, 1)) + 
+  theme(legend.position="none") +
+  xlab("") + 
+  ylab("% melanogaster")
+
+#ggsave(plot.ms.orchvin, file="plots/supp_D1A_coi_ov.pdf", height=4, width=4)
+
+
+#then latitude
+#plot.ms.latitude<-
+ggplot(site.clim.coi, aes(x=latitude, y=percMel)) +
+  stat_smooth(method="lm", color="black", alpha=0.3, fullrange=FALSE) + 
+  geom_point(aes(color=orch.vin)) +
+  theme_classic() + 
+  xlab("Latitude") + 
+  ylab("% melanogaster") + 
+  scale_color_manual(values=pal.ov) +
+  scale_y_continuous(limits=c(0, 1.1), breaks=c(0, 0.25, 0.5, 0.75, 1)) + 
+  theme(legend.position="right")
+
+#ggsave(plot.ms.latitude, file="plots/supp_D1B_coi_latov_leg.pdf", height=4, width=4)
+
+#test model for contribution of orcahrd and vineyard over latitude
+clim.coi.m1<- lm(data=site.clim.coi, percMel~latitude+orch.vin)
+
+#check assumptions
+#resids normally distributed pretty much 
+hist(resid(clim.coi.m1))
+shapiro.test(resid(clim.coi.m1))
+#qqplot fine
+car::qqPlot(clim.coi.m1)
+#summary
+summary(clim.coi.m1)
+
+
+#going to find the sites w/ >10 melanogaster here
+#also filtering out the sites that were sampled later in season 
+my_mel<- site.clim.coi %>% select(location, k__melanogaster) %>% 
+   filter(location != "Terhune 11-1" | location != "Terhune 23-10" | location !="Unionville 10-17") %>%
+   filter(k__melanogaster > 10) %>% 
+   select(location) %>% droplevels
+
+my_mel %>% mutate_if(is.factor, as.character) -> my_mel
+
+#unlist to make a vector that can be used in the loop 
+mel.look.list<- unlist(my_mel)
+
+
+```
+
+
+beginning cleaning up the various quirks of the data
+then there is the work to show that different dna extraction method did not influence qualitative differences in analysis
+dna had to be extracted in two ways because of problems from tannins that lead to low yield with zymo dna plus kit
+so then did the extraction with zymo soil/fecal microbiome kit 
+
+```{r}
+#start with grapes 
+grape<- subset_samples(lg, substrate == "grape")
+
+#check distribution of read depth
+g.df.sizes<- as.data.frame(sample_data(grape))
+g.df.sizes$LibrarySize<- sample_sums(grape)
+#get summary that shows the spread 
+g.df.sizes %>%
+  group_by(location) %>%
+  summarise(min=min(LibrarySize), mean=mean(LibrarySize), max=max(LibrarySize), n=n())
+
+#rarefy down to 100 because so low after removing chloroplasts but want to keep all 4 reps of each 
+grape_r<- grape %>%
+    rarefy_even_depth(sample.size=100, replace=FALSE, trimOTUs=TRUE, rngseed=711)
+
+#fix the sample variable
+grape_r@sam_data$platetreat <- case_when(grape_r@sam_data$plate.no == "p83.01" ~ "DNA Plus kit", 
+                                         grape_r@sam_data$plate.no == "p83.04" ~ "DNA Plus kit", 
+                                         grape_r@sam_data$plate.no == "p83.05" ~ "DNA Plus kit", 
+                                         grape_r@sam_data$plate.no == "p83.06" ~ "DNA Plus kit", 
+                                         grape_r@sam_data$plate.no == "p83.09" ~ "DNA Plus kit",
+                                         grape_r@sam_data$plate.no == "p83.10" ~ "DNA Plus kit",
+                                         grape_r@sam_data$plate.no == "p91.01" ~ "DNA Plus kit", 
+                                         grape_r@sam_data$plate.no == "p93.12_nodig" ~ "Fecal/soil kit",
+                                         grape_r@sam_data$plate.no == "p93.13_dig" ~ "Fecal/soil kit")
+                                
+
+#get sample data
+df_grape<- as(sample_data(grape_r), "data.frame")
+
+#ordinate
+grape_bray<- ordinate(
+  physeq = grape_r,
+  method = "PCoA",
+  distance = "bray",
+  type = "samples"
+  )
+
+#custom shapes to see where the p93 samples are 
+#visualize braycurtis
+#plot.gcheck.bray<-
+plot_ordination(
+    physeq = grape_r,
+    ordination = grape_bray,
+    #color="location", 
+    shape="platetreat") + 
+    theme_bw() +
+    facet_wrap(~location) +
+    geom_point(size=2) + 
+    scale_shape_manual(values = c(19,8)) +
+    #scale_color_brewer(palette = "Set2") + 
+    ggtitle("") + 
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+    theme(legend.position = "bottom")
+
+#ggsave(plot.gcheck.bray, file="plots/supp_M1A_checkgrapes_bray.pdf", height=5, width=5)
+
+#store dataframe of g)bray
+g_bray<- phyloseq::distance(grape_r, method="bray")
+
+#stats on the grapes
+adonis(g_bray ~  platetreat, data = df_grape)
+
+#apples next
+apple<- subset_samples(lg, substrate == "apple")
+
+#check distribution of read depth
+a.df.sizes<- as.data.frame(sample_data(apple))
+a.df.sizes$LibrarySize<- sample_sums(apple)
+
+a.df.sizes %>%
+  group_by(location) %>%
+  summarise(min=min(LibrarySize), mean=mean(LibrarySize), max=max(LibrarySize), n=n())
+
+#a lot of coverage here  
+apple_r<- apple %>%
+    rarefy_even_depth(sample.size=500, replace=FALSE, trimOTUs=TRUE, rngseed=711)
+
+#but problems with not all worked in dna extraction 
+
+
+#fix the plate labeling 
+apple_r@sam_data$platetreat<- case_when(apple_r@sam_data$plate.no == "p83.01" ~ "DNA Plus kit",
+                                         apple_r@sam_data$plate.no == "p83.02" ~ "DNA Plus kit",
+                                         apple_r@sam_data$plate.no == "p83.03" ~ "DNA Plus kit", 
+                                         apple_r@sam_data$plate.no == "p83.05" ~ "DNA Plus kit",
+                                         apple_r@sam_data$plate.no == "p83.06" ~ "DNA Plus kit",
+                                         apple_r@sam_data$plate.no == "p83.07" ~ "DNA Plus kit",
+                                         apple_r@sam_data$plate.no == "p83.08" ~ "DNA Plus kit", 
+                                         apple_r@sam_data$plate.no == "p83.09" ~ "DNA Plus kit",
+                                         apple_r@sam_data$plate.no == "p83.10" ~ "DNA Plus kit",
+                                         apple_r@sam_data$plate.no == "p91.01" ~ "DNA Plus kit", 
+                                         apple_r@sam_data$plate.no == "p93.12_nodig" ~ "Fecal/soil kit",
+                                         apple_r@sam_data$plate.no == "p93.13_dig" ~ "Fecal/soil kit")
+
+
+#ordinate
+apple_bray<- ordinate(
+  physeq = apple_r,
+  method = "PCoA",
+  distance = "bray",
+  type = "samples"
+  )
+
+#custom shapes to see where the p93 samples are 
+#visualize braycurtis
+#plot.acheck.bray<-
+plot_ordination(
+    physeq = apple_r,
+    ordination = apple_bray,
+    shape="platetreat") + 
+    theme_bw() +
+    facet_wrap(~location) +
+    geom_point(size=2) + 
+    scale_shape_manual(values = c(19,8)) +
+    ggtitle("") + 
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+    theme(legend.position = "bottom")
+
+#ggsave(plot.acheck.bray, file="plots/supp_M1B_checkapps_bray.pdf", height=5, width=5)
+
+#not enough samples to really across different extraction techniques to do an analysis
+
+#finally checking flies
+#finally check that fly pool is not that different from the individual flies
+dig_fly <- subset_samples(lg, location == "Unionville 10-17" | location == "Unionville 9-28")
+#keeep only fly and fly pool
+dig_fly <- subset_samples(dig_fly, group == "fly" | group == "fly.pool") 
+
+#check depth
+digfly.df<- as.data.frame(sample_data(dig_fly))
+digfly.df$size <- sample_sums(dig_fly)
+
+#go down to 500. keeps all of the fly pools just in case 
+digfly.df %>%
+  group_by(group) %>%
+  summarise(min=min(size), mean=mean(size), max=max(size), n=n())
+
+#rarefy for ordination. lost 5 samples 
+digfly_r<- dig_fly %>%
+    rarefy_even_depth(sample.size=500, replace=FALSE, trimOTUs=TRUE, rngseed=711)
+
+#ordinate
+digfly_bray<- ordinate(
+  physeq = digfly_r,
+  method = "PCoA",
+  distance = "bray",
+  type = "samples"
+  )
+
+#visualize braycurtis
+#plot.flycomp.bray<-
+plot_ordination(
+    physeq = digfly_r,
+    ordination = digfly_bray,
+    color="location", 
+    shape = "group") +
+    theme_classic() +
+    geom_point(size=2) + 
+    scale_shape_manual(values = c(1,19), labels = c("DNA Plus kit", "Fecal/soil kit")) +
+    #scale_color_brewer(palette = "Spectral") + 
+    ggtitle("")
+
+#ggsave(plot.flycomp.bray, file="plots/supp_M1C_checkfly.pdf", height=4, width=4)
+
+df_flydig<- as(sample_data(digfly_r), "data.frame")
+#format bray for adonis test
+digfly_bray <- phyloseq::distance(digfly_r, method = "bray")
+
+#because pools can only represent a subset of the data, check betadispersion
+#significant adonis test can be due to differences in dispersion
+#no difference for location
+b.flybrayloc<- betadisper(digfly_bray, df_flydig$location)
+permutest(b.flybrayloc)
+#no difference for group, but only 4 points. 
+b.flybraypool<- betadisper(digfly_bray, df_flydig$group)
+permutest(b.flybraypool)
+
+#adonis test is sig, but not sure can trust because only 2 points for fly pool/location
+adonis(digfly_bray ~ location + group, data = df_flydig)
+
+
+#showing the difference between digest and nondigest in apples and grapes 
+digsubs<- lg %>% subset_samples(group == "apple" | group == "grape") %>% prune_taxa(taxa_sums(.) > 0, .)
+
+#can i do it with just the dig no dig pages? 
+digsubs<- lg %>%
+  subset_samples(group == "apple" | group == "grape") %>% 
+  subset_samples(plate.no == "p93.12_nodig" | plate.no == "p93.13_dig") %>%
+  prune_taxa(taxa_sums(.) > 0, .)
+
+#look at sample sums. good depth
+sample_sums(digsubs)
+
+digsubs.r <- rarefy_even_depth(digsubs, sample.size=500, replace=FALSE, trimOTUs=TRUE, rngseed=12)
+
+#get sample data
+#get sampledata for ordination 
+digsubs.r.sam<- data.frame(sample_data(digsubs.r)) %>% rownames_to_column(., var="SampleID")
+
+#ordinate  
+digsubs.bray<- ordinate(
+  physeq = digsubs.r, 
+  method = "PCoA", 
+  distance = "bray")
+
+#visualize
+#plot.digs.bray<-
+plot_ordination(
+    physeq = digsubs.r, 
+    ordination = digsubs.bray, 
+    type="samples", 
+    color="location", 
+    shape="plate.no") + 
+    theme_classic() + 
+    geom_point(size=2) + 
+    scale_shape_manual(values = c(1,8)) +
+    theme(legend.position = "right") 
+
+#ggsave(plot.digs.bray, file="plots/supp_S2_digests_bray.pdf", height=4, width=5)
+
+
+#permanova stats just for digs
+digsubs_bray_df <- phyloseq::distance(digsubs.r, method = "bray")
+#test here
+#didn't use Dim.1 from climate PCA b/c very strongly correlated with latitude 
+adonis(digsubs_bray_df ~ plate.no, data = digsubs.r.sam)
+
+
+```
+
+
+the main focus of the paper is on the locations sampled over end sept, early octorber studies 
+i sampled a few sites repeatedly (Terhune and Unionville), so removing those from the analysis. 
+there were also several samples that are being removed b/c used to troubleshoot dna extraction problems in the grapes and apples (see above). 
+this is what follows is the clean up. 
+and for quirks of phyloseq--i could not figure out how to merge metadata within a phyloseq object. 
+so have to export and reimport to get everything organized. 
+```{r}
+#lg sin = lg singular location samples
+lg_sin<- lg %>%
+  #broad scale removing sample locations outside main sampling season
+  subset_samples(group !="fly.pool" & group != "leaf") %>%
+  #remove apple samples as done in the apple portion
+  subset_samples(arb.fly.sort != "sam.0002" & arb.fly.sort != "sam.0676" & arb.fly.sort != "sam.0794" & arb.fly.sort != "sam.0795" & arb.fly.sort != "sam.0796") %>%
+  #remove grape samples as done in the grape portion
+  subset_samples(arb.fly.sort != "sam.0077" & arb.fly.sort != "sam.0078" & arb.fly.sort != "sam.0079" & arb.fly.sort != "sam.0081" & arb.fly.sort != "sam.0082" & arb.fly.sort != "sam.0083" & arb.fly.sort != "sam.0196" & arb.fly.sort != "sam.0197" & arb.fly.sort != "sam.0198" & arb.fly.sort != "sam.0200" & arb.fly.sort != "sam.0201" & arb.fly.sort != "sam.0202" & arb.fly.sort != "sam.0278" & arb.fly.sort != "sam.0279" & arb.fly.sort != "sam.0280" & arb.fly.sort != "sam.0593" & arb.fly.sort != "sam.0594" & arb.fly.sort != "sam.0595" & arb.fly.sort != "sam.0633" & arb.fly.sort != "sam.0634" & arb.fly.sort != "sam.0635") %>%
+  prune_taxa(taxa_sums(.) > 0, .)
+
+#need to remove the frass samples and merge them together
+#don't trim extraneous taxa so that i can merge back with the next phyloseq object 
+lg_sin.p<- lg_sin %>% subset_samples(substrate.vis == "fly.frass") 
+
+#need to merge each location into one 
+p.merge<- merge_samples(lg_sin.p, "location")
+
+#the only variable that it maintains is latitude, which is very annoying 
+#location is left in the sample names
+#need to copy over the location into new value
+p.merge@sam_data$newname<- sample_names(p.merge)
+sample_names(p.merge)<- paste("pmer.", sample_names(p.merge), sep="")
+
+#need to reconvert everything like i'm going to do with the next lg_sin data 
+p.merge_otu<- p.merge@otu_table
+p.merge_tax<- p.merge@tax_table
+p.merge_meta<- p.merge@sam_data
+p.merge_tree<- p.merge@phy_tree
+
+#fix this set of metadata
+p.merge_meta<- as_tibble(p.merge_meta, rownames=NA) %>% rownames_to_column(var="sampleID")
+
+#similarly get sample info from lg_sin.p
+lg_sin.p_m<- as_tibble(lg_sin.p@sam_data)
+
+#dumb, but need to filter so that only one obs from this metadata
+#this should keep all 17 sites but only 1 obs per 17 sites 
+lg_sin.p_m1<- filter(lg_sin.p_m, plate.pos == "G5" | plate.pos == "G11")
+
+#fix the metadata by adding back in info before the merge 
+p.merge_m_good<- p.merge_meta %>%
+  #keeping only unique and informative metadata 
+  select(sampleID, newname) %>%
+  #rename newname to location
+  rename(location = newname) %>%
+  #merging
+  merge(., lg_sin.p_m1, by="location", all.x=TRUE) 
+
+#convert back into phyloseq objects
+#move column back to sample name
+p.merge_m_good<- column_to_rownames(p.merge_m_good, var="sampleID")
+#make metadata file for phyloseq 
+p.merge_m_good_ps<- sample_data(p.merge_m_good)
+#put it all together 
+p.merge.good<- phyloseq(p.merge_otu, p.merge_tax, p.merge_tree, p.merge_m_good_ps)
+
+#now again, dumb, but don't know how else to make all this metadata 
+#first remove poop samples from lgsin
+lgsin.nop<- lg_sin %>% subset_samples(substrate.vis != "fly.frass")
+
+#merge with new poop samples
+lgsin.msinp<- merge_phyloseq(lgsin.nop, p.merge.good) 
+  
+#export each item and then re-import. 
+lgsin_otu<- lgsin.msinp@otu_table
+lgsin_tax<- lgsin.msinp@tax_table
+lgsin_meta<- lgsin.msinp@sam_data
+lgsin_tree<- lgsin.msinp@phy_tree
+
+#have to convert the metadata to tibble
+lgsin_meta<- as_tibble(lgsin_meta, rownames=NA) %>% rownames_to_column(var="sampleID")
+
+lgsin_meta.c<- merge(lgsin_meta, clim.pcs, by="location", all.x=TRUE)
+
+#add in the coi data 
+lgsin_meta.c.ms<- lg.coi %>%
+  rename(sampleID = Sample, msOTU = OTU, msAbund = Abundance, msTax = Taxon, 
+         msind.sum = ind.sum, msrab = relabund) %>%
+  select(-c(location, latitude, substrate)) %>%
+  merge(lgsin_meta.c, ., by="sampleID", all.x=TRUE)
+
+#final clean up to get rid of some extraneous .x and .y 
+lgsin_meta.c.ms<- lgsin_meta.c.ms %>%
+  select(-c(orch.vin.y, latitude.y)) %>%
+  rename(orch.vin = orch.vin.x, latitude = latitude.x)
+
+#have to convert the Nas and k__melanogasters for simplicity here 
+temp.meta.na<- lgsin_meta.c.ms %>% filter(is.na(msTax) & group != "fly")
+
+#rename msTax
+temp.meta.na$msTax<- "other"
+
+#keeping only flies b/c have to rbind them back together and don't need duplicates 
+lgsin_meta.c.ms.f<- filter(lgsin_meta.c.ms, group=="fly")
+
+#rbind together 
+lgsin_meta.c.ms.b<- rbind(lgsin_meta.c.ms.f, temp.meta.na)
+
+#need to move SampleID to rownames. though got error and yes already has sampleids 
+lgsin_meta.c.ms.b<- column_to_rownames(lgsin_meta.c.ms.b, var="sampleID")
+
+#try reimporting the data
+META.lgsin<- sample_data(lgsin_meta.c.ms.b)
+
+
+#check sample names
+sample_names(lgsin_otu)
+sample_names(META.lgsin)
+
+#import
+lgsinclim<- phyloseq(lgsin_otu, lgsin_tax, META.lgsin, lgsin_tree)
+
+#double check its in properly 
+sample_names(lgsinclim)
+sample_variables(lgsinclim)
+tax_table(lgsinclim)
+
+#even sampling depth here 
+lg.sin.big.r <- rarefy_even_depth(lgsinclim, sample.size=500, replace=FALSE, trimOTUs=TRUE, rngseed=11)
+
+#save the rarefied object
+#saveRDS(lg.sin.big.r, file="lgsinbigclimcoi_r.Rds")
+
+```
+
+just a random quirk of the data given the complexity and the filtering--lgsinbigclimcoi_r.Rds has some extensive filtering outlined in the supplement. can start from loading rds here  
+```{r}
+#load file if want to skip preprocessing 
+#this has both melanogaster and simulans, relevant for later supplementary stuff 
+#lg.sin.big.r<- readRDS("lgsinbigclimcoi_r.Rds")
+
+#for some reason, the order of fly flyfrass and substrate is off 
+lg.sin.big.r@sam_data$substrate.vis_f<- factor(lg.sin.big.r@sam_data$substrate.vis, 
+                                               levels=c("fly", "fly.frass", "substrate"))
+
+
+#filter for just melanogaster
+mel.r<- 
+  lg.sin.big.r %>%
+  subset_samples(location %in% mel.look.list & !is.na(msTax)) %>%
+  subset_samples(msTax != "k__simulans") %>%
+  prune_taxa(taxa_sums(.) > 0, .)
+
+#this is ojbect to use later to save time 
+#saveRDS(mel.r, file="latgrad_melR.Rds")
+
+
+
+```
+
+another check is to show that rarefaction is ok 
+```{r}
+#make sure package ranacapa is downloaded
+#for ranacapa::ggrare, all samples have to have more reads than the step size
+
+#rarefy down to 1000 to show that at 500 pretty much fully sampled. at least for most ASVs
+#otherwise too confusing 
+plot.rare.1000<-
+lg %>%
+  #flypool is not part of the subsequent analyses 
+  subset_samples(group != "fly.pool") %>%
+  rarefy_even_depth(., sample.size=1000, replace=FALSE, trimOTUs=TRUE, rngseed=11) %>%
+  ranacapa::ggrare(., step=50, color="group", label=NULL, se=FALSE, plot=TRUE)
+
+#improving the plot
+#plot.rare.supp<-
+plot.rare.1000 + 
+  facet_wrap(~location) + 
+  #for 5000, highlight 500 and 1000 collection points 
+  geom_vline(xintercept = c(500, 1000), color="black") +
+  scale_color_manual(values = pal.group) +
+  scale_fill_manual(values=pal.group) + 
+  theme_bw() +
+  ylab("ASV richness") + 
+  theme(panel.grid = element_blank())
+
+#ggsave(plot.rare.supp, file="plots/supp_M3A_rarefaction.pdf", height=10, width=10)
+
+#want to look at how many ASVs are gained between 500 and 1000
+#plot.rare.percdiff<-
+plot.rare.1000$data %>%
+    filter(Size == 501 | Size == 1000) %>%
+    pivot_wider(names_from = Size, values_from = .S) %>%
+    mutate(diff = `1000`-`501`) %>%
+    mutate(perchange = (diff/`501`*100)) %>%
+    ggplot(., aes(x=group, y=perchange)) + 
+      geom_jitter(width=0.15, shape=1) +
+      geom_boxplot(width=0.3, alpha=0, outlier.shape=NA, color="#d53e4f") +
+      xlab("") + 
+      ylab("% increase in ASV richness") +
+      theme_classic() +
+      ylim(-1, 100)
+      
+#ggsave(plot.rare.percdiff, file="plots/supp_M3B_rarefaction_percdiff.pdf", height=5, width=3.5)
+```
+
+
+
+Start here for main analyses of fly associated microbiome data 
+relative abundance measures
+```{r}
+#import Rds of preprocessed phyloseq object to save time 
+#mel.r <- readRDS(file = "latgrad_melR.Rds")
+
+mel.r.ra<- mel.r %>%
+           tax_glom(taxrank = "Genus") %>%
+           psmelt() %>%
+           arrange(Genus)
+
+
+#finding most abundant genus/families across all samples 
+mel.r.ra %>%
+  #filter if want to look at different groups
+  #filter(group_f=="fly") %>% 
+  group_by(Sample) %>%
+  #get rid of 0's when filtering just for convenience 
+  #filter(Abundance > 0) %>%
+  mutate(total = sum(Abundance)) %>%
+  group_by(Family) %>%
+  mutate(rab=sum(Abundance)) %>%
+  select(Abundance, Family, rab) %>%
+  group_by(Family) %>%
+  summarise(meanF=mean(rab)) %>%
+  mutate(totRAB = meanF/sum(meanF)) %>%
+  arrange(desc(meanF))
+
+#looking for lactobacillus
+mel.r.ra %>%
+  #filter if want to look at different groups
+  #filter(group_f=="fly") %>% 
+  group_by(Sample) %>%
+  #get rid of 0's when filtering just for convenience 
+  #filter(Abundance > 0) %>%
+  mutate(total = sum(Abundance)) %>%
+  group_by(Genus) %>%
+  mutate(rab=sum(Abundance)) %>%
+  select(Abundance, Genus, rab) %>%
+  group_by(Genus) %>%
+  summarise(meanF=mean(rab)) %>%
+  mutate(totRAB = meanF/sum(meanF)) %>%
+  arrange(desc(meanF)) %>%
+  filter(Genus == "g__Lactobacillus")
+
+
+
+#replace and calculate relative abundance of genera 
+mel.r.rab<- mel.r.ra %>%
+               group_by(Sample) %>%
+               mutate(ind.sum = sum(Abundance)) %>%
+               group_by(Genus) %>%
+               mutate(relabund = Abundance/ind.sum) %>%
+               filter(relabund > .10)
+
+
+#get colors 
+lg_genabund = length(unique(mel.r.rab$Genus))
+gPal.set3= colorRampPalette(brewer.pal(9, "Set3"))
+pal.lggen<- gPal.set3(lg_genabund)
+
+#visualize in two different ways
+#facet by substrate to see overall patterns in diversity across latitude
+#plot.mel.ra.bysubs<- 
+ggplot(mel.r.rab, aes(x=fct_reorder(shortname, latitude, .desc = FALSE), y=relabund, fill=Genus)) + 
+    geom_bar(stat="identity", position = "fill") + 
+    facet_wrap(~substrate.vis_f, nrow=3) + 
+    ggh4x::force_panelsizes(rows = c(1, 0.5, 0.5)) +
+    theme_bw() + 
+    scale_fill_manual(values=pal.lggen) + 
+    xlab("") + 
+    ylab("Relative abundance") +
+    #for sizing to match rest of panel 
+    #theme(axis.text.x = element_blank()) +
+    theme(legend.key.size = unit(0.25, 'cm')) + 
+    theme(axis.text.x = element_text(angle=90, hjust=1)) + 
+    theme(panel.grid = element_blank()) +
+    theme(legend.position = "right")
+
+#save like this with the legend
+#ggsave(plot.mel.ra.bysubs, file="plots/fig2A_big_ra_leg.tiff", height = 8, width=8)
+
+#without legend 
+#ggsave(plot.mel.ra.bysubs, file="plots/fig2A_big_ra.tiff", height = 4, width=4)
+
+#to visualize by family 
+#plot.mel.ra.family<-
+ggplot(mel.r.rab, aes(x=fct_reorder(shortname, latitude, .desc = FALSE), y=relabund, fill=Family)) + 
+    geom_bar(stat="identity", position = "fill") + 
+    facet_wrap(~substrate.vis_f, nrow=3) + 
+    ggh4x::force_panelsizes(rows = c(1, 0.5, 0.5)) +
+    theme_bw() + 
+    scale_fill_manual(values=pal.lggen) + 
+    xlab("") + 
+    ylab("Relative abundance") +
+    #for sizing to match rest of panel 
+    #theme(axis.text.x = element_blank()) +
+    theme(legend.key.size = unit(0.25, 'cm')) + 
+    theme(axis.text.x = element_text(angle=90, hjust=1)) + 
+    theme(panel.grid = element_blank()) +
+    theme(legend.position = "right")
+
+#ggsave(plot.mel.ra.family, file="plots/supp_R1_big_mel_ra_fam.tiff", height=6, width=8)
+
+```
+
+ordinate to show general patterns of overlap between fly, frass and substrate
+```{r}
+#get sampledata for ordination 
+mel.r.sam<- data.frame(sample_data(mel.r))
+#move sampleid to column
+mel.r.sam<- rownames_to_column(mel.r.sam, var="SampleID")
+
+#ordinate for 
+mel.big.bray<- ordinate(
+  physeq = mel.r, 
+  method = "PCoA", 
+  distance = "bray")
+
+#look at overlap between the sampletype 
+#plot.lg.big.bray.subs<- 
+  plot_ordination(
+    physeq = mel.r, 
+    ordination = mel.big.bray, 
+    type="samples", 
+    color="substrate.vis_f") + 
+    theme_classic() + 
+    geom_point() + 
+    scale_color_manual(values = pal.ffs) +
+    theme(legend.position = "right") + 
+    labs(col = "Sample type") 
+
+#ggsave(plot.lg.big.bray.subs, file="plots/fig2B_big_mel_pcoa_bray_subs.pdf", height=4, width=3)
+
+#permanova stats to look at what drives variation in community composition
+mel_big_bray_df <- phyloseq::distance(mel.r, method = "bray")
+#test here
+#didn't use Dim.1 from climate PCA b/c very strongly correlated with latitude 
+adonis(mel_big_bray_df ~ substrate.vis_f + latitude + orch.vin + Dim.2, strata=mel.r.sam$location, data = mel.r.sam)
+
+#to test for dispersion differences, making a grouped variable for categorical factors in the above model
+
+#sample type
+mel_big_bray_subs<- betadisper(mel_big_bray_df, mel.r.sam$substrate.vis_f)
+permutest(mel_big_bray_subs)
+
+#latitude
+mel_big_bray_lat<- betadisper(mel_big_bray_df, mel.r.sam$latitude)
+#convert group to numeric 
+mel_big_bray_lat$group<- as.numeric(mel_big_bray_lat$group)
+permutest(mel_big_bray_lat)
+
+#orch.vin
+mel_big_bray_ov<- betadisper(mel_big_bray_df, mel.r.sam$orch.vin)
+permutest(mel_big_bray_ov)
+
+#climate PC2
+mel_big_bray_dim2<- betadisper(mel_big_bray_df, mel.r.sam$Dim.2)
+
+mel_big_bray_dim2$group<- as.numeric(mel_big_bray_dim2$group)
+
+permutest(mel_big_bray_dim2)
+
+#unifrac shows simliar patterns and is in supplement 
+
+mel.big.uni<- ordinate(
+  physeq = mel.r, 
+  method = "PCoA", 
+  distance = "unifrac")
+
+#plot.lg.big.uni<- 
+    plot_ordination(
+    physeq = mel.r, 
+    ordination = mel.big.uni, 
+    type="samples", 
+    color="substrate.vis_f") + 
+    theme_classic() + 
+    geom_point(size=2) + 
+    scale_color_manual(values = pal.ffs) +
+    theme(legend.position = "right") + 
+    labs(col = "Sample type")
+
+#ggsave(plot.lg.big.uni, file="plots/supp_R2_big_mel_pcoa_uni_leg.pdf", height=4, width=5)
+
+#make unifrac data frame
+mel_big_uni_df <- phyloseq::distance(mel.r, method = "unifrac")
+#test here
+#didn't use Dim.1 from climate PCA b/c very strongly correlated with latitude 
+adonis(mel_big_uni_df ~ substrate.vis_f + latitude + orch.vin + Dim.2, strata=mel.r.sam$location, data = mel.r.sam)
+
+#betadispersions
+#sampletype
+mel_big_uni_permu.subs <- betadisper(mel_big_uni_df, mel.r.sam$substrate.vis_f)
+permutest(mel_big_uni_permu.subs)
+
+#latitude
+mel_big_uni_permu.latitude <- betadisper(mel_big_uni_df, mel.r.sam$latitude)
+#convert to numeric for permutest
+mel_big_uni_permu.latitude$group <- as.numeric(mel_big_uni_permu.latitude$group)
+permutest(mel_big_uni_permu.latitude)
+
+
+#orch.vin
+mel_big_uni_permu.ov <- betadisper(mel_big_uni_df, mel.r.sam$orch.vin)
+permutest(mel_big_uni_permu.ov )
+
+#climate pc2
+mel_big_uni_permu.dim2 <- betadisper(mel_big_uni_df, mel.r.sam$Dim.2)
+#convert to numeric 
+mel_big_uni_permu.dim2$group <- as.numeric(mel_big_uni_permu.dim2$group)
+permutest(mel_big_uni_permu.dim2)
+
+
+```
+
+look to understand the overlap between different groups shapes diversity
+```{r}
+#get correlation matrix. have to had lg.sin.big.r loaded 
+#intiate the dataframe that will hold the data
+#if there's an error, make sure to remove and then re-initiate the df
+cor.df=data.frame()
+#get list of the locations to turn through the loop below
+my_list<- list(levels(mel.r@sam_data$location))
+#unlist to make a vector that can be used in the loop 
+look.list<- unlist(my_list)
+
+for(i in 1:length(look.list)) {
+#asv_correlation<- function(x) {
+  #subset the big rarefied data set to get fly/frass/substrate by each location in list
+  fly.cor<- mel.r %>% subset_samples(substrate.vis == "fly" & location == look.list[i]) %>% prune_taxa(taxa_sums(.) > 0, .)
+
+  frass.cor<- mel.r %>% subset_samples(substrate.vis == "fly.frass" & location == look.list[i]) %>% prune_taxa(taxa_sums(.) > 0, .)
+
+  sub.cor<- mel.r  %>% subset_samples(substrate.vis == "substrate" & location == look.list[i]) %>% prune_taxa(taxa_sums(.) > 0, .)
+  
+  #find the length of asvs in each
+  find.min.asv<- min(length(names(taxa_sums(fly.cor))), length(names(taxa_sums(frass.cor))), length(names(taxa_sums(sub.cor))))
+
+  #use min length for the search space in commonality 
+  topfly <- names(sort(taxa_sums(fly.cor), TRUE)[1:find.min.asv])
+  #new phyloseq object to look at top 50 in all flies 
+  fly50 <- prune_taxa(topfly, fly.cor)
+  #make dataframe that keeps ASVs
+  fly50cor<- tibble::enframe(taxa_sums(fly50), name="OTU", value="fly.count")
+  
+  #do for frass
+  topfrass <- names(sort(taxa_sums(frass.cor), TRUE)[1:find.min.asv])
+  #new phyloseq object to look at top 50 in all flies 
+  frass50 <- prune_taxa(topfrass, frass.cor)
+  #make dataframe that keeps ASVs
+  frass50cor<- tibble::enframe(taxa_sums(frass50), name="OTU", value="frass.count")
+  
+  #do for substrate
+  topsub <- names(sort(taxa_sums(sub.cor), TRUE)[1:find.min.asv])
+  #new phyloseq object to look at top 50 in all substrates
+  sub50 <- prune_taxa(topsub, sub.cor)
+  #make dataframe that keeps ASVs
+  sub50cor<- tibble::enframe(taxa_sums(sub50), name="OTU", value="sub.count")
+  
+  #put together fly and fly frass
+  total50cor<- merge(fly50cor, frass50cor, by="OTU", all=TRUE)
+  #add in substrate 
+  total50cor<- merge(total50cor, sub50cor, by="OTU", all=TRUE)
+
+  #get all the otus for genus assignment
+  total50cor.otu<- total50cor$OTU
+
+#get only these 90 taxa
+total50cor.tax<- prune_taxa(total50cor.otu, mel.r)
+#get the taxonomic assigment
+total50cor.tax.g<- total50cor.tax %>% psmelt() %>% select(OTU, Family, Genus) %>% distinct(OTU, .keep_all=TRUE)
+#merge with the original cor matrix 
+total50cor<- merge(total50cor, total50cor.tax.g, by="OTU")
+
+#log10 transform the sample counts
+total50cor<- total50cor %>%
+  mutate(log.flycount = log10(fly.count)) %>%
+  mutate(log.frasscount = log10(frass.count)) %>%
+  mutate(log.subcount = log10(sub.count)) %>%
+  mutate(location=look.list[i])
+
+#change NAs to 0
+#get error, but it's because of the text. not a problem probably 
+total50cor[is.na(total50cor)] <- 0
+
+#temp storage in df that will then rbind to cor.df
+df<- data.frame(total50cor)
+cor.df<- rbind(cor.df, df)
+}
+
+#add back in covariates by site. 
+cor.df.env<- 
+mel.r.sam %>%
+  #bc cor.df is by location, filter for single entry per location
+  filter(substrate.vis == "substrate") %>%
+  #merge with cor.df
+  merge(cor.df, ., by="location", all.x=TRUE)
+
+#look for most abundant asvs by shared vs not shared
+cor.allabund.df<-
+cor.df.env %>%
+  #define the new abund groups 
+  mutate(abund.group = case_when(fly.count > 0 & sub.count > 0 & frass.count > 0 ~ "all shared",
+                                 fly.count > 0 & sub.count > 0 ~ "fly + sub", 
+                                 sub.count > 0 & frass.count > 0 ~ "frass + sub",
+                                 frass.count > 0 & fly.count > 0 ~ "fly + frass", 
+                                 frass.count > 0 ~ "frass only",
+                                 fly.count > 0 ~ "fly only",
+                                 sub.count > 0 ~ "sub only")) %>%
+  #reorder the factors 
+  mutate(abund.group_f = factor(abund.group, levels =c("all shared", "fly + sub", "fly + frass", "frass + sub", "fly only", "frass only", "sub only"))) %>%
+  #have to add together abundance for otus that are shared 
+  mutate(group.count = case_when(fly.count > 0 & sub.count > 0 & frass.count > 0 ~ fly.count + sub.count + frass.count,
+                                 fly.count > 0 & sub.count > 0 ~ fly.count + sub.count, 
+                                 sub.count > 0 & frass.count > 0 ~ sub.count + frass.count,
+                                 frass.count > 0 & fly.count > 0 ~ frass.count + fly.count, 
+                                 frass.count > 0 ~ frass.count,
+                                 fly.count > 0 ~ fly.count,
+                                 sub.count > 0 ~ sub.count)) %>%
+#new log transform
+mutate(log.group.count = log10(group.count))
+
+
+#visualize differences in abundance 
+#plot.asvabund.allcomp<-
+ggplot(cor.allabund.df, aes(x=fct_reorder(abund.group_f, log.group.count, .fun="median", .desc = TRUE), y=log.group.count)) + 
+    geom_boxplot() + 
+    theme_classic() +
+    theme(panel.grid=element_blank()) + 
+    xlab("") + 
+    ylab("ASV abundance (log10)") + 
+    ylim(0, 4.5)
+
+#ggsave(plot.asvabund.allcomp, file="plots/fig2C_big_allabundcomp.pdf", height=4, width=3)
+
+#pairwise comparisions with benjamani hochberg correction
+pairwise.wilcox.test(cor.allabund.df$log.group.count, cor.allabund.df$abund.group_f, p.adjust.method = "BH")
+
+
+#try arranging more easily here though have to save the figures to do this 
+# plot.fig.1<- 
+#  ggarrange(plot.mel.ra.bysubs,
+#          ggarrange(plot.lg.big.bray.subs, plot.asvabund.allcomp, ncol=2, labels=c("B", "C"), widths=c(4,5)), 
+#          nrow=2, labels="A", common.legend = FALSE, heights = c(3,2)) 
+
+#ggsave(plot.fig.1, file="plots/fig1.pdf", height=6.5, width=9, dpi=600)
+#to deal with random white lines in relative abundances 
+#ggsave(plot.fig.1, file="plots/fig1_ALL.tiff", height=6.5, width=9, dpi=600)
+
+```
+
+
+next look just at drivers of fly diversity. 
+
+first, look to see how frass and substrate work. most of the figures are in the supplement
+```{r}
+#using the same rarefied object. already at 500 depth 
+m.subs.r<- mel.r %>%
+  subset_samples(substrate.vis == "substrate") %>%
+  prune_taxa(taxa_sums(.) > 0, .)
+
+#calculate alpha diversity 
+#save sample data
+m.subs.r.sam<- data.frame(sample_data(m.subs.r))
+#move rownames to sampleid
+m.subs.r.sam<- rownames_to_column(m.subs.r.sam, var="SampleID")
+
+#calculate alpha diversity on rarefied dat
+m.subs.shan<- estimate_richness(m.subs.r, measures = "Shannon")
+#move rownames to sampleid
+m.subs.shan<- rownames_to_column(m.subs.shan, var="SampleID")
+
+#faith's phylogenetic diversity
+m.subs.pdr<- estimate_pd(m.subs.r)
+#move rownames to sampleid
+m.subs.pdr<- rownames_to_column(m.subs.pdr, var="SampleID")
+
+#merge the measures together 
+m.subs.alpha<- merge(m.subs.pdr, m.subs.shan, by="SampleID")
+
+#merge with the samdata
+m.subs.alpha<- merge(m.subs.alpha, m.subs.r.sam, by="SampleID")
+
+m.subs.alpha.v<- gather(m.subs.alpha, alpham, measurement, PD, SR, Shannon, factor_key = TRUE)
+#update factors for visualizaiton
+m.subs.alpha.v$alpham_f<- factor(m.subs.alpha.v$alpham, levels=c("SR", "Shannon", "PD"))
+
+#repeat for frass 
+#using the same rarefied object. already at 500 depth 
+m.fr.r<- mel.r %>%
+  subset_samples(substrate.vis == "fly.frass") %>%
+  prune_taxa(taxa_sums(.) > 0, .)
+
+#calculate alpha diversity 
+#save sample data
+m.fr.r.sam<- data.frame(sample_data(m.fr.r))
+#move rownames to sampleid
+m.fr.r.sam<- rownames_to_column(m.fr.r.sam, var="SampleID")
+
+#calculate alpha diversity on rarefied dat
+m.fr.shan<- estimate_richness(m.fr.r, measures = "Shannon")
+#move rownames to sampleid
+m.fr.shan<- rownames_to_column(m.fr.shan, var="SampleID")
+
+#faith's phylogenetic diversity
+m.fr.pdr<- estimate_pd(m.fr.r)
+#move rownames to sampleid
+m.fr.pdr<- rownames_to_column(m.fr.pdr, var="SampleID")
+
+#merge the measures together 
+m.fr.alpha<- merge(m.fr.pdr, m.fr.shan, by="SampleID")
+
+#merge with the samdata
+m.fr.alpha<- merge(m.fr.alpha, m.fr.r.sam, by="SampleID")
+
+
+#diversity stats 
+summary(lm(data=m.subs.alpha, Shannon~latitude+orch.vin))
+summary(lm(data=m.subs.alpha, PD~latitude+orch.vin))
+
+summary(lm(data=m.fr.alpha, Shannon~latitude+orch.vin))
+summary(lm(data=m.fr.alpha, PD~latitude+orch.vin))
+
+#plotting relationship between latitude and alpha div measures for both frass and subsrate
+
+#plot.frasubs.alpha<- 
+m.fr.alpha %>%
+  rbind(., m.subs.alpha) %>%
+  pivot_longer(c(PD, SR, Shannon), names_to="alpham", values_to = "measurement") %>%
+  filter(alpham != "SR") %>%
+  ggplot(., aes(x=latitude, y=measurement, group=orch.vin)) + 
+  geom_smooth(method="lm", se=TRUE, aes(color=orch.vin)) + 
+  geom_point(aes(color=orch.vin)) + 
+  facet_grid(alpham~substrate.vis, scales="free") + 
+  theme_bw() + 
+  scale_color_manual(values=pal.ov) + 
+  theme(panel.grid = element_blank()) + 
+  theme(legend.position = "right") + 
+  labs(x="Latitude", y=expression(alpha*"-diversity"))
+
+#ggsave(plot.frasubs.alpha, file="plots/supp_R3_frasubs_alpha_leg.pdf", height=5, width=6)
+
+
+#merge together to see if these values predict each other
+#to merge with alpha metrics from substrates need to chnage the column names
+m.fr.alpha.m<- m.fr.alpha %>%
+  rename(SR.fr = SR, PD.fr = PD, Sha.fr = Shannon) 
+
+#select only unique metadata columns so doesn't duplicate all of them 
+m.frs.alpha.m<- 
+  m.subs.alpha %>%
+  select(c(PD, SR, Shannon, location)) %>%
+  rename(SR.sb = SR, PD.sb = PD, Sha.sb = Shannon) %>%
+  merge(., m.fr.alpha.m, by="location", all.x=TRUE)
+
+#double check if frass predicts substrate diversity
+#not for PD f1,11=1.391, p=0.26
+summary(lm(data=m.frs.alpha.m, PD.sb~PD.fr))
+#not for Shannon f1,11=0.05, p=0.84
+summary(lm(data=m.frs.alpha.m, Sha.sb ~ Sha.fr))
+
+#plot.subfr.pd <- 
+ggplot(m.frs.alpha.m, aes(x=PD.fr, y=PD.sb)) + 
+  geom_smooth(method="lm", color="black", alpha=0.3) +
+  geom_point(aes(color=orch.vin)) +
+  theme_classic() +
+  scale_color_manual(values=pal.ov) + 
+  xlab("Frass PD") + 
+  ylab("Substrate PD") +
+  ggtitle("A: Subs~Frass PD") +
+  theme(legend.position = "right")
+
+#ggsave(plot.subfr.pd, file="v2_plots/supp_subfrasspd_leg.pdf", height=3, width=3)
+
+#plot.subfr.sha<- 
+ggplot(m.frs.alpha.m, aes(x=Sha.fr, y=Sha.sb)) + 
+  geom_smooth(method="lm", color="black", alpha=0.3) +
+  geom_point(aes(color=orch.vin)) +
+  theme_classic() +
+  scale_color_manual(values=pal.ov) + 
+  xlab("Frass Shannon div.") + 
+  ylab("Substrate Shannon div.") +
+  ggtitle("B: Subs~Frass Shannon") +
+  theme(legend.position = "none")
+
+#ggsave(plot.subfr.sha, file="v2_plots/supp_subfrasssha.pdf", height=3, width=3)
+
+#need to look at whether beta diversity was shaped in either substrate or frass
+#substrate
+subs_bray_df<- phyloseq::distance(m.subs.r, method = "bray")
+adonis(subs_bray_df ~ latitude+orch.vin, data = m.subs.r.sam)
+
+#check permutest
+#need to join latitude and orchvin
+m.subs.r.sam<- 
+  m.subs.r.sam %>%
+  mutate(permuvars = paste0(latitude, orch.vin)) 
+
+sub_bray_permu <- betadisper(subs_bray_df, m.subs.r.sam$orch.vin)
+permutest(sub_bray_permu)
+
+sub_bray_permu_lat<- betadisper(subs_bray_df, m.subs.r.sam$latitude)
+permutest(sub_bray_permu_lat)
+
+#visualize
+subs.bray<- ordinate(
+  physeq = m.subs.r, 
+  method = "PCoA", 
+  distance = "bray"
+  )
+
+#visualize
+#axis 1 = 48.8. axis2=15.5 % explained 
+#plot.m.subs.bray<-
+#plot.subs.bray.pc<- 
+plot_ordination(
+    physeq = m.subs.r, 
+    ordination = subs.bray, 
+    type="samples", 
+    justDF=TRUE) %>%
+  ggplot(., aes(x=Axis.1, y=Axis.2)) +
+    geom_point(aes(fill=bigstate_f),colour="#636363", pch=21, size=2.5, stroke=0.1) +
+    theme_classic() + 
+    scale_fill_manual(values=pal.bigstate) +
+    labs(title="A: Substrate (Bray-Curtis)", fill="Location", x="Axis 1 [48.8%]", y="Axis 2 [15.5%]") +
+    theme(legend.position = "none")  
+ 
+#ggsave(plot.subs.bray.pc, file="v2_plots/supp_subsbraypc.pdf", height=3, width=3)
+
+
+#frass
+frass_bray_df<- phyloseq::distance(m.fr.r, method = "bray")
+adonis(frass_bray_df ~ latitude+orch.vin, data = m.fr.r.sam)
+
+frass_bray_disp<- betadisper(frass_bray_df, m.fr.r.sam$orch.vin)
+permutest(frass_bray_disp)
+
+#visualize
+fr.bray<- ordinate(
+  physeq = m.fr.r, 
+  method = "PCoA", 
+  distance = "bray"
+)
+
+#visualize
+#axis 1 = 24.8. axis2=16.7 % explained 
+#plot.m.fr.bray.pc<-
+plot_ordination(
+    physeq = m.fr.r, 
+    ordination = fr.bray, 
+    type="samples", 
+    justDF=TRUE) %>%
+  ggplot(., aes(x=Axis.1, y=Axis.2)) +
+    geom_point(aes(fill=bigstate_f), colour="#636363", pch=21, size=2.5, stroke=0.1) +
+    theme_classic() + 
+    scale_fill_manual(values=pal.bigstate) +
+    labs(title="B: Frass (Bray-Curtis)", fill="Origin", x="Axis 1 [24.8%]", y="Axis 2 [16.7%]") +
+    theme(legend.position = "none")  
+
+#ggsave(plot.m.fr.bray.pc, file="v2_plots/supp_frassbraypc.pdf", height=3, width=3)
+
+#plot.m.fr.bray.cor<-
+plot_ordination(
+    physeq = m.fr.r, 
+    ordination = fr.bray, 
+    type="samples", 
+    justDF=TRUE) %>%
+  ggplot(., aes(x=latitude, y=Axis.2)) +
+    geom_smooth(method="lm", color="black", alpha=0.2) +
+    geom_point(aes(fill=orch.vin),colour="#636363", pch=21, size=2.5, stroke=0.1) +
+    theme_classic() + 
+    scale_fill_manual(values=pal.ov) +
+    labs(title="C: Frass~Latitude", fill="Origin", x="Latitude", y="Axis 2 [16.7%]") +
+    theme(legend.position = "right")  
+
+#ggsave(plot.m.fr.bray.cor, file="v2_plots/supp_frassbraycor.pdf", height=3, width=3)
+
+test.fr.bray<- plot_ordination(
+    physeq = m.fr.r, 
+    ordination = fr.bray, 
+    type="samples", 
+    justDF=TRUE)
+
+#axis 1 is not significant, but axis 2 is and  illustrates better than PCoA 
+summary(lm(data=test.fr.bray, Axis.1~latitude+orch.vin))
+
+summary(lm(data=test.fr.bray, Axis.2~latitude+orch.vin))
+
+```
+
+
+looking at just flies now
+```{r}
+lgs.fly.r<- mel.r %>%
+           subset_samples(group=="fly") %>%
+           subset_samples(!is.na(msTax)) %>%
+           prune_taxa(taxa_sums(.) > 0, .)
+
+#store sample data here
+lg.fly.r.sam<- data.frame(sample_data(lgs.fly.r))
+#add sample id as variable
+lg.fly.r.sam$SampleID <- rownames(lg.fly.r.sam)
+
+#add in percmel to the data set
+lg.fly.r.sam<-
+  site.clim.coi %>%
+  select(location, percMel) %>%
+  merge(lg.fly.r.sam, ., by="location", all.x=TRUE)
+
+#basic ordination 
+lgs.fly.bray<- ordinate(
+  physeq = lgs.fly.r, 
+  method = "PCoA", 
+  distance = "bray"
+  )
+
+
+
+#visualize
+#plot.lgsin.fly.bray<-
+plot_ordination(
+    physeq = lgs.fly.r, 
+    ordination = lgs.fly.bray, 
+    type="samples", 
+    justDF=TRUE) %>%
+  ggplot(., aes(x=Axis.1, y=Axis.2)) +
+    geom_point(aes(fill=bigstate_f),colour="#636363", pch=21, size=2.5, stroke=0.1) +
+    theme_classic() + 
+    scale_fill_manual(values=pal.bigstate) +
+    scale_color_manual(values=pal.bigstate) + 
+    theme(legend.position = "right") + 
+    labs(fill="Location", x="Axis 1 [27.6%]", y="Axis 2 [14.5%]")
+
+#ggsave(plot.lgsin.fly.bray, file="plots/fig3B_fly_bray_state.pdf", height=4, width=4)
+
+#permanova 
+f_bray_df <- phyloseq::distance(lgs.fly.r, method = "bray")
+
+#test here
+adonis(f_bray_df ~latitude + orch.vin + Dim.2 + percMel + shortname, data = lg.fly.r.sam)
+
+#check betadispersion
+#latitude
+fly_bray_permu.lat <- betadisper(f_bray_df, lg.fly.r.sam$latitude)
+#convert latitude to numeric
+fly_bray_permu.lat$group <- as.numeric(fly_bray_permu.lat$group)
+permutest(fly_bray_permu.lat)
+
+#orch.vin
+fly_bray_permu.ov <- betadisper(f_bray_df, lg.fly.r.sam$orch.vin)
+permutest(fly_bray_permu.ov)
+
+#clim PC2
+fly_bray_permu.dim2 <- betadisper(f_bray_df, lg.fly.r.sam$Dim.2)
+#convert latitude to numeric
+fly_bray_permu.dim2$group <- as.numeric(fly_bray_permu.dim2$group)
+permutest(fly_bray_permu.dim2)
+
+#percent melanogaster
+fly_bray_permu.mel <- betadisper(f_bray_df, lg.fly.r.sam$percMel)
+#convert latitude to numeric
+fly_bray_permu.mel$group <- as.numeric(fly_bray_permu.mel$group)
+permutest(fly_bray_permu.mel)
+
+#location
+fly_bray_permu.site <- betadisper(f_bray_df, lg.fly.r.sam$shortname)
+#convert latitude to numeric
+permutest(fly_bray_permu.site)
+
+#look at alpha diversity
+#need to add sample id
+
+#calculate alpha diversity on rarefied dat
+lgs.fly.shan<- estimate_richness(lgs.fly.r, measures = "Shannon")
+#move rownames to sampleid
+lgs.fly.shan<- rownames_to_column(lgs.fly.shan, var="SampleID")
+
+#faith's phylogenetic diversity
+lgs.fly.pdr<- estimate_pd(lgs.fly.r)
+#move rownames to sampleid
+lgs.fly.pdr<- rownames_to_column(lgs.fly.pdr, var="SampleID")
+
+#merge the measures together 
+lgs.fly.alpha<- merge(lgs.fly.pdr, lgs.fly.shan, by="SampleID")
+
+#merge with the samdata
+lgs.fly.alpha<- merge(lgs.fly.alpha, lg.fly.r.sam, by="SampleID")
+
+#add in the substrate and frass alpha diversity measures as covariates 
+lgs.fly.alpha.m<- m.frs.alpha.m %>%
+  select(c(location, PD.sb, SR.sb, Sha.sb, PD.fr, SR.fr, Sha.fr)) %>%
+  merge(lgs.fly.alpha, ., by="location", all.x=TRUE)
+
+#pivot longer to add facet
+#showing boxplot ordered by south to north 
+#plot.fly.alpha<- 
+lgs.fly.alpha.m %>%
+  pivot_longer (c(PD, SR, Shannon), names_to="alpham", values_to = "measurement") %>%
+  filter(alpham != "SR") %>%
+  ggplot(., aes(x=fct_reorder(shortname, latitude), y=measurement)) + 
+  geom_boxplot(aes(color=orch.vin), outlier.color = "white") + 
+  geom_point(aes(color=orch.vin), shape=21) + 
+  facet_grid(rows = vars(alpham), scales = "free") + 
+  theme_bw() + 
+  scale_color_manual(values=pal.ov) + 
+  theme(panel.grid = element_blank()) + 
+  theme(legend.position = "bottom") + 
+  labs(x="", y=expression(alpha*"-diversity"), col="") +
+  theme(axis.text.x = element_text(angle = 90, hjust=1))
+
+#ggsave(plot.fly.alpha, file="plots/fig3A_fly_alpha_leg.pdf", height=4, width=6)
+
+#stats for shannon 
+#REML is false becuase drop1 will compare fixed effects 
+fly.shan.m1<- lme4::lmer(data=lgs.fly.alpha.m,  Shannon~latitude + orch.vin + Dim.2 +percMel + (1|location), REML=FALSE)
+#for drop analysis
+drop1(fly.shan.m1, test="Chisq")
+
+fly.shan.m1b<- lmerTest::lmer(data=lgs.fly.alpha.m,  Shannon~latitude + orch.vin + Dim.2 +percMel + (1|location), REML=FALSE)
+
+summary(fly.shan.m1b)
+MuMIn::r.squaredGLMM(fly.shan.m1b)
+#qqplot looksok 
+qqnorm(resid(fly.shan.m1b))
+qqline(resid(fly.shan.m1b))
+#residuals barely normally distributed
+shapiro.test(resid(fly.shan.m1b))
+#some funk to the far right between fitted and resid
+plot(fly.shan.m1b)
+
+
+#stats for faith's pd 
+#fit w/ glmer because model diagnostics really funky w/ lmer 
+#however, when i fit including latitude, the model cannot converge 
+fly.pd.m2<- lme4::glmer(data=lgs.fly.alpha.m,  PD~latitude + orch.vin + Dim.2 + percMel  + (1|location), family=Gamma(link = "log"))
+summary(fly.pd.m2)
+hist(resid(fly.pd.m2))
+#still some skew, but much better 
+qqnorm(resid(fly.pd.m2))
+qqline(resid(fly.pd.m2))
+shapiro.test(resid(fly.pd.m2))
+#still a little uneven skew, but much better than gaussian 
+plot(fly.pd.m2)
+
+drop1(fly.pd.m2, test="Chisq")
+
+MuMIn::r.squaredGLMM(fly.pd.m2)
+
+#put together alpha and betadiversity for figure 2
+#plot.fig.2<- 
+#  ggarrange(plot.fly.alpha, plot.lgsin.fly.bray,  ncol=2, labels=c("A", "B"), widths=c(3,2))
+
+#ggsave(plot.fig.2, file="plots/fig2_ALL.pdf", height=3.25, width=9, dpi=600)
+
+  
+#also did some  analyses to see if the frass or substrate alpha diversity measures predict fly per site
+alpha.sitecors<- 
+  lgs.fly.alpha.m %>%
+  group_by(location) %>%
+  summarise(flymeanSha = mean(Shannon), flymeanPD = mean(PD), lat=mean(latitude))
+
+#add back in substrate and frass measures 
+alpha.sitecors.m<- 
+  m.frs.alpha.m %>%
+  select(c(location, PD.sb, SR.sb, Sha.sb, PD.fr, SR.fr, Sha.fr, orch.vin)) %>%
+  merge(alpha.sitecors, ., by="location", all.x=TRUE)
+
+#not significant
+summary(lm(data=alpha.sitecors.m, flymeanSha ~ Sha.sb+orch.vin))
+summary(lm(data=alpha.sitecors.m, flymeanSha ~ Sha.fr+orch.vin))
+
+summary(lm(data=alpha.sitecors.m, flymeanPD ~ PD.fr+orch.vin))
+summary(lm(data=alpha.sitecors.m, flymeanPD ~ PD.sb+orch.vin))
+
+#do the substrate/frass plots by facet for each alpha diversity measure
+#plot.flysubfr.shannon<- 
+alpha.sitecors.m %>%
+  select(c(location, flymeanSha, Sha.sb, Sha.fr, orch.vin)) %>%
+  #dumb but being lazy
+  mutate(Frass = Sha.fr, Substrate = Sha.sb) %>%
+  pivot_longer(c(Frass, Substrate), names_to = "subfr", values_to="covar") %>%
+  ggplot(., aes(x=covar, y=flymeanSha)) +
+  geom_smooth(method="lm", color="black") + 
+  geom_point(aes(color=orch.vin)) + 
+  facet_grid(~subfr) + 
+  scale_color_manual(values=pal.ov) +
+  theme_bw() + 
+  theme(panel.grid = element_blank()) +
+  ylim(1.5, 3) + 
+  labs(col="") + 
+  xlab("Shannon diversity") + 
+  ylab("Avg. fly Shannon diversity") 
+
+#ggsave(plot.flysubfr.shannon, file="plots/supp_R4A_fly_shan_corsubfr.pdf", height=4, width=4)
+
+#plot.flysubfr.pd<-
+alpha.sitecors.m %>%
+  select(c(location, flymeanPD, PD.sb, PD.fr, orch.vin)) %>%
+  #dumb but being lazy
+  mutate(Frass = PD.fr, Substrate = PD.sb) %>%
+  pivot_longer(c(Frass, Substrate), names_to = "subfr", values_to="covar") %>%
+  ggplot(., aes(x=covar, y=flymeanPD)) + 
+  geom_smooth(method="lm", color="black") + 
+  geom_point(aes(color=orch.vin)) + 
+  facet_grid(~subfr, scales="free") + 
+  scale_color_manual(values=pal.ov) +
+  theme_bw() + 
+  theme(panel.grid = element_blank()) +
+  labs(col="") +
+  xlab("Faith's diversity") + 
+  ylab("Avg. fly Faith's diversity") +
+  ylim(0,4)
+
+#ggsave(plot.flysubfr.pd, file="plots/supp_R4B_fly_pd_corsubfr.pdf", height=4, width=4)
+
+
+
+```
+
+
+next examine the neutrality in the microbiome
+```{r}
+
+#look at over neutrality in the fly microbiome
+#plot occupancy
+#transpose to format for neutral modelling
+allmel.otu= t(otu_table(lgs.fly.r))
+
+#include taxon to see what taxa are above or below
+allmel.fit = tyRa::fit_sncm(spp=allmel.otu, pool=NULL, taxon=data.frame(tax_table(lgs.fly.r)))
+#default plot from tyRa package 
+tyRa::plot_sncm_fit(allmel.fit)
+
+#save the predictions to make a table with summary
+#allmel.fit$predictions %>%
+#  filter(fit_class != "As predicted") %>%
+#  write.table(., file="v2_neutpred.csv", sep=",", row.names = TRUE)
+
+
+#save predictions here ot plot following tyRa source code, but easier to customize this way 
+plot.fit<- ggplot(data=allmel.fit$predictions)
+
+#plot.allmel.neutr<- 
+plot.fit + geom_point(aes(x=log(p), y=freq, fill=fit_class), shape=21, stroke=0.25, size=2.5) + 
+     geom_line(aes(x = log(p), y = freq.pred), color = "black")+ 
+     geom_line(aes(x = log(p), y = pred.lwr), color = "black", linetype="dashed") +
+     geom_line(aes(x = log(p), y = pred.upr), color = "black", linetype="dashed") +
+     scale_fill_manual(values=c("#fdb462", "#bdbdbd", "#80b1d3"), 
+                       labels = c("Above prediction (3.3%)", "As predicted (93.3%)", "Below prediction (3.4%)")) + 
+     theme_classic() +
+     labs(x="log (Mean relative abundance)", y="Prevalance", fill=paste('r\u00b2 = 0.9547\nPrediction')) + 
+     theme(legend.position = "none") + 
+     theme(legend.key.size = unit(0.25, 'cm')) + 
+     theme(legend.text = element_text(size=8))
+
+#ggsave(plot.allmel.neutr, file="plots/fig4A_fly_neutrality_leg.pdf", height=4, width=4)
+
+#now loook site by site to see how neutrality varies over the latitudal gradient 
+rsq.melonly.df <- data.frame()
+melonly.predicts.df<- data.frame()
+melonly.fitclass.df <- data.frame()
+
+#loop through each one 
+#already have the look.list from earlier 
+for(i in 1:length(look.list)) {
+
+#loop through each location for each of the levels
+#then convert to dataframe so that i can merge and clean up
+flyo.df = lgs.fly.r %>% subset_samples(location == look.list[i]) %>% prune_taxa(taxa_sums(.) > 0, .)
+
+flyo.count<- tibble::enframe(taxa_sums(flyo.df), name="OTU", value="fly.count")
+
+#remove any singletons and doubletons 
+flyo.count.f<- flyo.count %>% filter(fly.count > 10)
+
+#get list of the otus to go back to get the tax table
+flys.list<- flyo.count.f$OTU
+  
+#filter the phyloseq object to keep only these OTUs
+flysonly.ps<- subset(otu_table(flyo.df), rownames(otu_table(flyo.df)) %in% flys.list)
+newflysonly<- merge_phyloseq(flysonly.ps, tax_table(flyo.df), sample_data(flyo.df), phy_tree(flyo.df))
+ 
+#transpose to format for neutral modelling
+flysonly.otu= t(otu_table(newflysonly))
+
+flysonly.fit = tyRa::fit_sncm(spp=flysonly.otu, pool=NULL, taxon=NULL)
+
+flysonly.data = data.frame(location = look.list[i], Rsqr = flysonly.fit$fitstats$Rsqr, m=flysonly.fit$fitstats$m, mci=flysonly.fit$fitstats$m.ci)
+
+#save the predictions just in case 
+flysonly.predicts = flysonly.fit$predictions
+#add in location to keep track
+flysonly.predicts$location = look.list[i]
+  
+#save percentage above and below for jsut easier 
+flysonly.fitclass <- data.frame(flysonly.predicts %>% group_by(fit_class) %>% tally() %>% mutate(location = look.list[i]))
+
+#save plot
+plot.fit<- tyRa::plot_sncm_fit(flysonly.fit) + theme_minimal() 
+
+#uncomment when running for the first time. 
+#ggsave(plot.fit, filename=paste("v1_plots_melonly/supp_neutral_",look.list[i],".pdf",sep=""), height=4, width=6)
+
+rsq.melonly.df  <- rbind(rsq.melonly.df, flysonly.data)
+melonly.predicts.df <- rbind(melonly.predicts.df, flysonly.predicts)
+melonly.fitclass.df<- rbind(melonly.fitclass.df, flysonly.fitclass)
+  
+}
+
+#join with environmental variables 
+rsq.melonly.env<-
+  site.clim.coi %>%
+    merge(rsq.melonly.df, ., by="location", all.x=TRUE) 
+
+#add in big state for visualization
+rsq.melonly.env<- 
+  mel.r.sam %>%
+  #dumb quirk can't seem to fix other way
+  #just want one entry per location 
+  filter(substrate.vis_f == "substrate") %>%
+  select(c(location, bigstate_f, shortname, Dim.1, Dim.2)) %>%
+  merge(rsq.melonly.env, ., by="location", all.x=TRUE)
+
+
+#plot.neutral.ov<-
+ggplot(rsq.melonly.env, aes(x=latitude, y=Rsqr)) + 
+  geom_smooth(method="lm", alpha=0.25, color="black") + 
+  geom_point(aes(fill=orch.vin), size=2.5, shape=21, stroke=0.25) +
+  theme_classic() + 
+  scale_fill_manual(values = pal.ov) +
+  ylim(0,1) + 
+  theme(legend.position = "right") + 
+  labs(fill="Origin") + 
+  xlab("Latitude") + 
+  ylab(expression("Neutral fit"~(r^2))) + 
+  theme(legend.key.size = unit(0.25, 'cm')) + 
+  theme(legend.text = element_text(size=8))
+
+#ggsave(plot.neutral.ov, file="plots/fig4B_fly_neutrality_ov.pdf", height=4, width=4)
+
+rsq.melonly.m1<- lm(data=rsq.melonly.env, Rsqr~latitude+orch.vin)
+#resids look a bit funky, but shapiro test says OK w=0.87, p=0.06
+hist(resid(rsq.melonly.m1))
+shapiro.test(resid(rsq.melonly.m1))
+qqnorm(resid(rsq.melonly.m1))
+qqline(resid(rsq.melonly.m1))
+plot(rsq.melonly.m1,1)
+
+summary(rsq.melonly.m1)
+
+#put figures together
+#fig3<-
+#ggarrange(plot.allmel.neutr, plot.neutral.ov, labels=c("A","B"))
+#
+#ggsave(fig3, file="plots/fig3_ALL.pdf", height=3.25, width=9, dpi=600)
+
+```
+
+exploring similar analyses with the seasonal dynamics
+filtering and rarefying was done in the supplement. 
+```{r}
+#the rarefied lg sin big r already has all the sites 
+#filter out the Terhune 11-1 to even out sampling # between Terhune and Unionville 
+temp.r<- lg.sin.big.r %>% 
+  subset_samples(location != "Terhune 11-1") %>%
+  subset_samples(msTax != "k__simulans") %>%  
+  prune_taxa(taxa_sums(.) > 0, .)
+
+#create new variable to highlight the temporal samples
+temp.r@sam_data$temporal <-
+    case_when(temp.r@sam_data$location == "Terhune 26-9" ~ "8.NJ.O.early", 
+              temp.r@sam_data$location == "Terhune 23-10" ~ "8.NJ.O.late", 
+              temp.r@sam_data$location == "Unionville 9-28" ~ "6.NJ.V.early", 
+              temp.r@sam_data$location == "Unionville 10-17" ~ "6.NJ.V.late") 
+
+#rename nas to something else 
+temp.r@sam_data$temporal<- temp.r@sam_data$temporal %>% replace_na("other site")
+
+#order these factors
+temp.r@sam_data$temporal_f<- factor(temp.r@sam_data$temporal, levels=c("8.NJ.O.early", "8.NJ.O.late", "6.NJ.V.early", "6.NJ.V.late", "other site"))
+
+temp.r@sam_data$season<- 
+  case_when(temp.r@sam_data$temporal == "8.NJ.O.late" ~ "late",
+            temp.r@sam_data$temporal == "6.NJ.V.late" ~ "late")
+
+temp.r@sam_data$season<- temp.r@sam_data$season %>% replace_na("in season")
+
+
+```
+
+using only the paired sites these subsequent analyses
+want to focus more on the paired sites 
+```{r}
+temp.pair.r<- temp.r %>% subset_samples(temporal_f != "other site") %>% prune_taxa(taxa_sums(.) > 0, .)
+
+#going to fix the location levels this way
+temp.pair.r@sam_data$share<- case_when(temp.pair.r@sam_data$location == "Terhune 23-10" ~ "8.NJ.O", 
+                                       temp.pair.r@sam_data$location == "Terhune 26-9" ~ "8.NJ.O", 
+                                       temp.pair.r@sam_data$location == "Unionville 9-28" ~ "6.NJ.V", 
+                                       temp.pair.r@sam_data$location == "Unionville 10-17" ~ "6.NJ.V")
+
+
+
+#get sample data 
+pair.r.sam<- data.frame(sample_data(temp.pair.r))
+#move sampleid to column
+pair.r.sam<- rownames_to_column(pair.r.sam, var="SampleID")
+
+#make relative abundance bar plots like before
+pair.r.ra<- temp.pair.r %>%
+           tax_glom(taxrank = "Genus") %>%
+           psmelt() %>%
+           arrange(Genus)
+
+
+#look at percent chagne 
+pair.r.ra %>%
+  #filter if want to look at different groups
+  filter(temporal=="8.NJ.O.early") %>% 
+  group_by(Sample) %>%
+  #get rid of 0's when filtering just for convenience 
+  #filter(Abundance > 0) %>%
+  mutate(total = sum(Abundance)) %>%
+  group_by(Genus) %>%
+  mutate(rab=sum(Abundance)) %>%
+  select(Abundance, Genus, rab) %>%
+  group_by(Genus) %>%
+  summarise(meanF=mean(rab)) %>%
+  mutate(totRAB = meanF/sum(meanF)) %>%
+  arrange(desc(meanF))
+
+#replace and calculate relative abundance of genera
+pair.r.rab<- pair.r.ra %>%
+               group_by(Sample) %>%
+               mutate(ind.sum = sum(Abundance)) %>%
+               group_by(Genus) %>%
+               mutate(relabund = Abundance/ind.sum) %>%
+               filter(relabund > .10)
+
+#look at rel abund for diffrent groups
+pair.r.ra %>%
+  filter(share == "6.NJ.V" & substrate.vis_f == "fly") %>%
+  group_by(season) %>%
+  mutate(ind.sum=sum(Abundance)) %>%
+  group_by(Genus) %>%
+  mutate(relabund = Abundance/ind.sum) %>%
+  summarise(mean = mean(relabund))
+
+#get colors to match the big relative abundance plot
+
+pal.pair.rab<- c("#8DD3C7", "#CEECBB", "#EEF8B5", "#E3E1C3", "#E0989E",
+                 "#C6949B", "#A3A3B7", "#F7CEE3", "#EDD2DF", "#D9D9D9")
+
+#plot.pair.rab<-
+ggplot(pair.r.rab, aes(x=season, y=relabund, fill=Genus)) + 
+    geom_bar(stat="identity", position = "fill") + 
+    facet_grid(share~substrate.vis_f) + 
+    #ggh4x::force_panelsizes(rows = c(1, 0.5, 0.5)) +
+    theme_bw() + 
+    scale_fill_manual(values=pal.pair.rab) + 
+    xlab("") + 
+    ylab("Relative abundance") +
+    #for sizing to match rest of panel 
+    #theme(axis.text.x = element_blank()) +
+    theme(legend.key.size = unit(0.25, 'cm')) + 
+    theme(axis.text.x = element_text(angle=90, hjust=1)) + 
+    theme(panel.grid = element_blank()) +
+    theme(legend.position = "right") + 
+    theme(strip.text = element_text(size = 8))
+
+#save like this with the legend
+#ggsave(plot.pair.rab, file="plots/fig5A_pair_rab.pdf", height=4, width=5)
+#save as tiff to deal with the lines
+#ggsave(plot.pair.rab, file="plots/fig5A_pair_rab.tiff", height=4, width=5, dpi=600)
+
+#ordinate 
+pair.big.bray<- ordinate(
+  physeq = temp.pair.r, 
+  method = "PCoA", 
+  distance = "bray")
+
+#visualize
+#plot.temp.pair.bray<-
+  plot_ordination(
+    physeq = temp.pair.r, 
+    ordination = pair.big.bray, 
+    type="samples") + 
+    theme_classic() + 
+    geom_point(aes(fill=temporal, shape=substrate.vis_f), stroke=0.2, size=3) + 
+    scale_fill_manual(values = c("#756bb1", "#4a4370", "#fb6a4a", "#94260d")) +
+    scale_shape_manual(values=c(21,22,23)) +
+    theme(legend.position = "right") + 
+    labs(fill = "Location", shape="Sample type") +
+    theme(legend.key.size = unit(0.25, 'cm')) + 
+    theme(legend.text = element_text(size=8))
+  
+  
+#ggsave(plot.temp.pair.bray, file="plots/fig5B_temp_pair_bray.pdf", height=4, width=4)
+
+#to get the legend like i want it, have to play around with hiding the color or shape 
+plot.temp.pair.bray.leg<-
+  plot_ordination(
+    physeq = temp.pair.r, 
+    ordination = pair.big.bray, 
+    type="samples") + 
+    theme_classic() + 
+    geom_point(aes(fill=temporal), shape=21, stroke=0.2, size=3) + 
+    scale_fill_manual(values = c("#756bb1", "#4a4370", "#fb6a4a", "#94260d")) +
+    #scale_shape_manual(values=c(21,22,23)) +
+    theme(legend.position = "right") + 
+    labs(fill = "Location") +
+    theme(legend.key.size = unit(0.25, 'cm')) + 
+    theme(legend.text = element_text(size=8))
+
+#ggsave(plot.temp.pair.bray.leg, file="plots/fig5B_temp_pair_bray_leg.pdf", height=4, width=4)
+
+
+#ordinate   
+pair_bray_df <- phyloseq::distance(temp.pair.r, method = "bray")
+#adonis
+adonis(pair_bray_df ~ substrate.vis_f + season*share, data=pair.r.sam )
+
+#permdisps
+#substrate
+pair_bray_permu.subs <- betadisper(pair_bray_df, pair.r.sam$substrate.vis_f)
+permutest(pair_bray_permu.subs)
+
+#season
+pair_bray_permu.season <- betadisper(pair_bray_df, pair.r.sam$season)
+permutest(pair_bray_permu.season)
+
+#site
+pair_bray_permu.site <- betadisper(pair_bray_df, pair.r.sam$share)
+permutest(pair_bray_permu.site)
+
+```
+
+perform similar neutral dynamics test for the paired sites 
+```{r}
+#neutral dynamics only 
+pair.mel.r<- temp.pair.r %>% subset_samples(substrate.vis_f == "fly") %>% prune_taxa(taxa_sums(.) > 0, .)
+
+#sample data
+pair.mel.r.sam<- data.frame(sample_data(pair.mel.r))
+
+#get list to loop through 
+pair.list<- unlist(levels(pair.mel.r.sam$temporal_f))
+
+
+#repeat the neutral dynamics loop
+rsq.pair.df <- data.frame()
+pair.predicts.df<- data.frame()
+pair.fitclass.df <- data.frame()
+
+#loop through each one 
+#already have the look.list from earlier 
+for(i in 1:length(pair.list)) {
+
+#loop through each location for each of the levels
+#then convert to dataframe so that i can merge and clean up
+flyo.df = pair.mel.r %>% subset_samples(temporal_f == pair.list[i]) %>% prune_taxa(taxa_sums(.) > 0, .)
+
+flyo.count<- tibble::enframe(taxa_sums(flyo.df), name="OTU", value="fly.count")
+
+#remove any singletons and doubletons 
+flyo.count.f<- flyo.count %>% filter(fly.count > 10)
+
+#get list of the otus to go back to get the tax table
+flys.list<- flyo.count.f$OTU
+  
+#filter the phyloseq object to keep only these OTUs
+flysonly.ps<- subset(otu_table(flyo.df), rownames(otu_table(flyo.df)) %in% flys.list)
+newflysonly<- merge_phyloseq(flysonly.ps, tax_table(flyo.df), sample_data(flyo.df), phy_tree(flyo.df))
+ 
+#transpose to format for neutral modelling
+flysonly.otu= t(otu_table(newflysonly))
+
+flysonly.fit = tyRa::fit_sncm(spp=flysonly.otu, pool=NULL, taxon=NULL)
+
+flysonly.data = data.frame(location = pair.list[i], Rsqr = flysonly.fit$fitstats$Rsqr, m=flysonly.fit$fitstats$m, mci=flysonly.fit$fitstats$m.ci)
+
+#save the predictions just in case 
+flysonly.predicts = flysonly.fit$predictions
+#add in location to keep track
+flysonly.predicts$location = pair.list[i]
+  
+#save percentage above and below for jsut easier 
+flysonly.fitclass <- data.frame(flysonly.predicts %>% group_by(fit_class) %>% tally() %>% mutate(location = pair.list[i]))
+
+#save plot
+plot.fit<- tyRa::plot_sncm_fit(flysonly.fit) + theme_minimal() 
+
+#uncomment when running for the first time. 
+#ggsave(plot.fit, filename=paste("v1_plots_melonly/supp_temporal_neutral_",pair.list[i],".pdf",sep=""), height=4, width=6)
+
+rsq.pair.df  <- rbind(rsq.pair.df, flysonly.data)
+pair.predicts.df <- rbind(pair.predicts.df, flysonly.predicts)
+pair.fitclass.df<- rbind(pair.fitclass.df, flysonly.fitclass)
+  
+}
+
+#add in more metadata to rsqr 
+rsq.pair.env<- 
+  pair.r.sam %>%
+  #dumb quirk can't seem to fix other way
+  #just want one entry per location 
+  filter(substrate.vis_f == "fly.frass") %>%
+  select(c(temporal, season, share)) %>%
+  merge(rsq.pair.df, ., by.x="location", by.y="temporal", all.x=TRUE)
+
+
+#i think the average r2 at each site is where the points are converging
+#the average rsq at each site is 0.7808
+rsq.all.avg<- rsq.melonly.df %>%
+  summarise(avg=mean(Rsqr))
+
+
+#just visualize the difference this way 
+#plot.neut.pair.temporal<-
+ggplot(rsq.pair.env, aes(x=season, y=Rsqr)) + 
+  geom_hline(yintercept=rsq.all.avg$avg, linetype="dashed", stroke=0.25) +
+  geom_line(aes(group=share), stroke=0.25) +
+  geom_point(aes(fill=share), shape=21, size=3, stroke=0.25) + 
+  scale_fill_manual(values=c("#756bb1","#fb6a4a"), name = "Origin") + 
+  theme_classic() + 
+  xlab("") + 
+  ylab(expression("Neutral fit"~(r^2))) +
+  scale_y_continuous(breaks=seq(0.5, 1, 0.1), limits = c(0.45,1)) +
+  theme(legend.key.size = unit(0.25, 'cm')) + 
+  theme(legend.text = element_text(size=8))
+  
+#ggsave(plot.neut.pair.temporal, file="plots/fig5C_pair_neutrality.pdf", height=4, width=4)
+
+
+#put together for figure 4
+#fig4<-ggarrange(plot.pair.rab, 
+#          ggarrange(plot.temp.pair.bray, plot.neut.pair.temporal, nrow=2, labels=c("B", "C")), 
+#          ncol=2, labels="A", common.legend=FALSE, widths=c(2.5,2))
+
+#the saving of this is complicated b/c of quirks with the lines in relative abundance
+#ggsave(fig4, file="plots/fig4_ALL.pdf", height=6.5, width=9, dpi=600)
+#the saving of this is complicated b/c of quirks with the lines in relative abundance
+#ggsave(fig4, file="plots/fig4_ALL.tiff", height=6.5, width=9, dpi=600)
+
+#also have to fix the bray curtis figure colors for some reason
+
+#fig4.bc.leg<-ggarrange(plot.pair.rab, 
+#          ggarrange(plot.temp.pair.bray.leg, plot.neut.pair.temporal, nrow=2, labels=c("B", "C")), 
+#          ncol=2, labels="A", common.legend=FALSE, widths=c(2.5,2))
+#have to frankenstein it back together
+#ggsave(fig4.bc.leg, file="plots/fig4_bc_leg.pdf", height=6.5, width=9, dpi=600 )
+
+
+```
+
+
+
