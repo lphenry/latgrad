@@ -1,0 +1,102 @@
+#import into QIIME 
+#because dual indexed is not supported by QIIME2, demultiplexed and then imported each plate using the QIIME manifest format
+#so for each plate (13 plates), the 96 samples were imported like so:
+
+#change for each manifest 
+qiime tools import \
+  --type 'SampleData[PairedEndSequencesWithQuality]' \
+  --input-path mergemani_p93_13 \
+  --output-path demux-13.qza \
+  --input-format PairedEndFastqManifestPhred33V2
+  
+#denoise and determine ASVs
+#change for each demux object 
+qiime dada2 denoise-paired \
+  --i-demultiplexed-seqs demux-13.qza \
+  --p-trim-left-f 10 \
+  --p-trim-left-r 10 \
+  --p-trunc-len-f 230 \
+  --p-trunc-len-r 230 \
+  --o-table table-13.qza \
+  --o-representative-sequences rep-seqs-13.qza \
+  --o-denoising-stats denoising-stats-13.qza \
+  --p-n-threads 10
+
+#then merged all together 
+qiime feature-table merge \
+  --i-tables table-01.qza \
+  --i-tables table-02.qza \
+  --i-tables table-03.qza \
+  --i-tables table-04.qza \
+  --i-tables table-05.qza \
+  --i-tables table-06.qza \
+  --i-tables table-07.qza \
+  --i-tables table-08.qza \
+  --i-tables table-09.qza \
+  --i-tables table-10.qza \
+  --i-tables table-11.qza \
+  --i-tables table-12.qza \
+  --i-tables table-13.qza \
+  --o-merged-table table-all.qza
+  
+qiime feature-table merge-seqs \
+  --i-data rep-seqs-01.qza \
+  --i-data rep-seqs-02.qza \
+  --i-data rep-seqs-03.qza \
+  --i-data rep-seqs-04.qza \
+  --i-data rep-seqs-05.qza \
+  --i-data rep-seqs-06.qza \
+  --i-data rep-seqs-07.qza \
+  --i-data rep-seqs-08.qza \
+  --i-data rep-seqs-09.qza \
+  --i-data rep-seqs-10.qza \
+  --i-data rep-seqs-11.qza \
+  --i-data rep-seqs-12.qza \
+  --i-data rep-seqs-13.qza \
+  --o-merged-data rep-seqs-all.qza
+
+#then make tree 
+qiime phylogeny align-to-tree-mafft-fasttree \
+  --i-sequences rep-seqs-all.qza \
+  --o-alignment aligned-rep-seqs-all.qza \
+  --o-masked-alignment masked-aligned-rep-seqs-all.qza \
+  --o-tree unrooted-tree-all.qza \
+  --o-rooted-tree rooted-tree-all.qza
+  
+#classify
+qiime feature-classifier classify-sklearn \
+  --i-classifier gg-classifier-v12.qza\
+  --i-reads rep-seqs-all.qza \
+  --o-classification taxonomy-all.qza
+
+#visualize
+qiime taxa barplot \
+  --i-table table-all.qza \
+  --i-taxonomy taxonomy-all.qza \
+  --m-metadata-file latgrad_mergedmeta.tsv \
+  --o-visualization taxa-bar-plots-all.qzv
+  
+#export for phyloseq
+qiime tools export \
+ --input-path table-all.qza \
+ --output-path phyloseq/
+
+biom convert -i phyloseq/feature-table.biom -o phyloseq/otu_table.txt --to-tsv
+  
+#export tree 
+qiime tools export \
+ --input-path rooted-tree-all.qza \
+ --output-path phyloseq/
+
+#export taxonomy
+qiime tools export \
+ --input-path taxonomy-all.qza \
+ --output-path phyloseq/
+
+#download to local machine and follow protocol
+#cleanup files
+#open up otu table and change #OTU ID to OTUID and remove first line that saves converted from biom file. remove top #line was
+
+#open taxonomy file and make sure featureid is OTUID
+
+#move to r, import and then fix other formatting
