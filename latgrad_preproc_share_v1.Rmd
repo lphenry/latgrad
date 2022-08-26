@@ -1,0 +1,172 @@
+---
+title: "latgrad_preproc_share_v1"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+processing raw qiime output for use in phyloseq and analyses
+
+```{r}
+require(ggplot2)
+require(tidyverse)
+require(phyloseq)
+
+```
+
+
+
+```{r}
+#import otu table and convert to matrix
+otu_table<- read.csv("v1_data/qiime_otu_table.txt", sep="\t", row.names=1)
+otu_table<- as.matrix(otu_table)
+
+#import taxonomy cleaned table and convert to matrix
+taxonomy<- read.csv("v1_data/qiime_taxonomy_clean.csv", sep=",", row.names=1)
+taxonomy<- as.matrix(taxonomy)
+
+#read in metadata
+metadata <- read.table("v1_data/latgrad_master_meta.csv", sep=",", row.names=1, header=TRUE)
+
+#read in tree
+phy_tree<- read_tree("v1_data/qiime_tree.nwk")
+
+#fix the multiple daughters issue in the phylotree
+edges=phy_tree(phy_tree)$edge
+mycounts = table(edges[,1]) # Source nodes; 1st column of edge matrix
+length(mycounts[mycounts ==2]) # Number of nodes with exactly 2 children
+#[1] 1308
+length(mycounts[mycounts !=2]) # Number of nodes with more or fewer children
+#[1] 9
+mycounts[mycounts !=2] # How many nodes each of the above has
+
+#correct for nodes with more than 2 children using ape 
+phy_tree_fixed <- ape::multi2di(phy_tree(phy_tree))
+
+
+
+#import as phyloseq objects
+OTU<- otu_table(otu_table, taxa_are_rows = TRUE)
+TAX<- tax_table(taxonomy)
+META<- sample_data(metadata)
+
+#check OTU names are consistent across objects
+taxa_names(TAX)
+taxa_names(OTU)
+taxa_names(phy_tree_fixed)
+
+#check sample names
+sample_names(OTU)
+sample_names(META)
+
+#import into phyloseq object
+physeq<- phyloseq(OTU, TAX, META, phy_tree_fixed)
+
+#double check that the everything is named correctly
+sample_names(physeq)
+sample_variables(physeq)
+tax_table(physeq)
+
+#remove taxa that have 0 
+physeq_clean<- physeq %>%
+    prune_taxa(taxa_sums(.) > 0, .)
+
+physeq_clean<- physeq_clean %>%
+    subset_taxa(
+      Kingdom == "Bacteria" & 
+      Family != "mitochondria" & 
+      Class != "Chloroplast"
+    )
+
+#subsample and ordinate to look at neg ctrl vs samples
+#spoiler, it's annoying
+physeqclean_scale<- physeq %>%
+    rarefy_even_depth(sample.size=1000, replace=TRUE, trimOTUs=TRUE, rngseed=711)
+
+physeq_scale_bray<- ordinate(
+  physeq = physeqclean_scale, 
+  method = "PCoA", 
+  distance = "bray", 
+  type = "samples"
+  )
+
+#pcoa.bray<-
+plot_ordination(
+    physeq = physeqclean_scale, 
+    ordination = physeq_scale_bray, 
+    color="Sample_or_Control") + 
+    theme_classic() + 
+    geom_point(size=2) + 
+    ggtitle("PCoA [bray] for neg.ctrl")
+
+
+#using decontam to remove potential contaminants
+require(decontam)
+
+#already loaded in phyloseq object currently. as physeq.
+
+#check head to because need to confirm that we have metadata. 
+#metadata must have Sample_or_Control OR DNA quant
+head(sample_data(physeq_clean))
+
+#inspect library sizes
+df.sizes<- as.data.frame(sample_data(physeq_clean))
+df.sizes$LibrarySize<- sample_sums(physeq_clean)
+
+#reorder for visualization
+df.sizes<- df.sizes[order (df.sizes$LibrarySize), ]
+#reorder by index, which is just arbritary for visualization?
+df.sizes$Index<- seq(nrow(df.sizes))
+
+ggplot(data=df.sizes, aes(x=Index, y=LibrarySize, color=Sample_or_Control)) + 
+    geom_point() + 
+    theme_classic() + 
+    xlab("individual sequenced")
+
+#identifying potential contaminants by prevalence
+#prevalence approach uses presence absence across samples to identify contaminants
+
+#define controls as potential contaminants. i.e. sequencing blanks or extraction blanks 
+sample_data(physeq_clean)$is.neg<- sample_data(physeq)$Sample_or_Control == "negctrl" 
+#make contamination dataframe to hold 
+contamdf.prev<- isContaminant(physeq_clean, method="auto", neg="is.neg") 
+
+#look at what was removed 
+table(contamdf.prev$contaminant)
+
+#this shows how abundant (i.e. ranking of OTUs) are the top 6 contaminants. 
+head(which(contamdf.prev$contaminant))
+
+#visualize presence absence in negative contrls and true samples
+
+#build phyloseq object of presence absence in negative controls and true samples
+ps.pa<- transform_sample_counts(physeq_clean, function(abund) 1*(abund>0))
+#define which are negative
+ps.pa.neg<- prune_samples(sample_data(ps.pa)$Sample_or_Control == "negctrl", ps.pa)
+#define which are positive
+ps.pa.pos<- prune_samples(sample_data(ps.pa)$Sample_or_Control == "sample", ps.pa)
+
+#make dataframe of prevalence in psotiive and negative samples
+df.pa<- data.frame(pa.pos=taxa_sums(ps.pa.pos), pa.neg=taxa_sums(ps.pa.neg), 
+                   contaminant = contamdf.prev$contaminant)
+
+#visualize plot of prevalence negative vs positive 
+ggplot(data=df.pa, aes(x=pa.neg, y=pa.pos, color = contaminant)) + 
+    geom_point() + 
+    xlab("prevalence (negative controls)") +
+    ylab("prevalence (true samples)")
+
+
+latgrad<- prune_taxa(!contamdf.prev$contaminant, physeq_clean)
+
+#removing neg.ctrls, the not sterile flies, and wolbachia for analysis
+latgrad_nw<- latgrad %>%
+  subset_samples(Sample_or_Control != "negctrl") %>%
+  subset_taxa(Genus != "Wolbachia") %>%
+  prune_taxa(taxa_sums(.) > 0, .)
+
+#save the cleaned up phyloseq object
+#saveRDS(latgrad_nw, "latgrad_nowolb.rds")
+
+
+```
